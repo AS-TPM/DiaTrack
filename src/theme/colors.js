@@ -1,0 +1,21 @@
+/** Dark palette for DiaTrack */
+export const colors = {
+  background: '#07080c',
+  surface: '#11141c',
+  surfaceHover: '#171b26',
+  border: 'rgba(255, 255, 255, 0.08)',
+  borderStrong: 'rgba(255, 255, 255, 0.12)',
+  text: '#f1f4fa',
+  textSecondary: '#8b95a8',
+  textTertiary: '#5c6575',
+  accent: '#5ee6d0',
+  accentSoft: 'rgba(94, 230, 208, 0.14)',
+  inRange: '#6ee7b7',
+  high: '#fb923c',
+  low: '#60a5fa',
+  ateCta: '#f59e0b',
+  ateCtaPressed: '#d97706',
+  tabBar: '#0a0c10',
+  tabInactive: '#6b7280',
+  tabActive: '#5ee6d0',
+};
