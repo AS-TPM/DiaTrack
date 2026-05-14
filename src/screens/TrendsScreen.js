@@ -1,3 +1,5 @@
+import { Dimensions } from 'react-native';
+import { LineChart } from 'react-native-chart-kit';
 import { useCallback, useMemo, useState } from 'react';
 import {
   View,
@@ -15,6 +17,7 @@ import { getGlucoseDailyTrendBuckets } from '../db/glucoseReadings';
 import { colors } from '../theme/colors';
 
 const RANGE_MS = 30 * 24 * 60 * 60 * 1000;
+const screenWidth = Dimensions.get('window').width;
 
 function formatDay(dayStr) {
   if (!dayStr || typeof dayStr !== 'string') return '';
@@ -54,11 +57,22 @@ export default function TrendsScreen() {
     }, [load])
   );
 
-  const maxBar = useMemo(() => {
-    const vals = buckets.map((b) => Number(b.avg_v) || 0);
-    const m = Math.max(0, ...vals);
-    return Math.max(180, m * 1.1);
-  }, [buckets]);
+  const chartData = useMemo(() => {
+  return {
+    labels: buckets.slice(-7).map((b) => formatDay(b.day)),
+    datasets: [
+      {
+        data: buckets.slice(-7).map((b) => Number(b.avg_v) || 0),
+      },
+    ],
+  };
+}, [buckets]);
+
+const maxBar = useMemo(() => {
+  const vals = buckets.map((b) => Number(b.avg_v) || 0);
+  const m = Math.max(0, ...vals);
+  return Math.max(180, m * 1.1);
+}, [buckets]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -100,6 +114,34 @@ export default function TrendsScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.section}>Daily average (mg/dL)</Text>
+          <LineChart
+  data={chartData}
+  width={screenWidth - 40}
+  height={220}
+  yAxisSuffix=""
+  withInnerLines={false}
+  withOuterLines={true}
+  withShadow={false}
+  fromZero={false}
+  chartConfig={{
+    backgroundColor: colors.surface,
+    backgroundGradientFrom: colors.surface,
+    backgroundGradientTo: colors.surface,
+    decimalPlaces: 0,
+    color: (opacity = 1) => `rgba(0, 212, 170, ${opacity})`,
+    labelColor: (opacity = 1) => `rgba(255,255,255,${opacity})`,
+    propsForDots: {
+      r: '5',
+      strokeWidth: '2',
+      stroke: colors.accent,
+    },
+  }}
+  bezier
+  style={{
+    marginBottom: 24,
+    borderRadius: 16,
+  }}
+/>
           {buckets.map((b) => {
             const avg = Number(b.avg_v);
             const h = Number.isFinite(avg) ? Math.min(100, (avg / maxBar) * 100) : 0;
