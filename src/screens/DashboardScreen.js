@@ -1,4 +1,6 @@
+import * as IntentLauncher from 'expo-intent-launcher';
 import { useCallback, useState } from 'react';
+import { Linking } from 'react-native';
 import {
   View,
   Text,
@@ -108,15 +110,31 @@ export default function DashboardScreen() {
     }, [reload, loadMeds, loadGlucose])
   );
 
-  const onIAte = useCallback(async () => {
-    await startMeal();
-    Alert.alert(
-      'Meal start saved',
-      nativeAlarmsAvailable
-        ? 'Native Android alarms are scheduled for medication (30 min) and glucose check (2 hr). Countdowns below update live.'
-        : 'Countdowns are saved on this device. Use an Android development build for native alarms when the app is closed.'
+const onIAte = useCallback(async () => {
+  await startMeal();
+
+if (Platform.OS === 'android') {
+  try {
+    await IntentLauncher.startActivityAsync(
+      'android.intent.action.SET_TIMER',
+      {
+        extra: {
+          'android.intent.extra.alarm.LENGTH': 1800,
+          'android.intent.extra.alarm.MESSAGE': 'Meal Timer',
+          'android.intent.extra.alarm.SKIP_UI': false,
+        },
+      }
     );
-  }, [startMeal, nativeAlarmsAvailable]);
+  } catch (e) {
+    console.log('Failed to open native timer', e);
+  }
+}
+
+  Alert.alert(
+    'Meal start saved',
+    '30 minute meal timer started. Glucose reminder will continue inside the app.'
+  );
+}, [startMeal]);
 
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long',

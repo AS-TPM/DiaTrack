@@ -15,6 +15,7 @@
     "expo": "~54.0.33",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.22",
+    "expo-intent-launcher": "~13.0.8",
     "expo-meal-alarms": "file:./modules/expo-meal-alarms",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
