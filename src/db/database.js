@@ -40,10 +40,39 @@ const DDL = `
   );
   CREATE INDEX IF NOT EXISTS idx_med_schedule_med
     ON medication_schedule_entries (medication_id);
+
+  CREATE TABLE IF NOT EXISTS medication_intake_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    meal_type TEXT NOT NULL,
+    meal_label TEXT NOT NULL,
+    meal_started_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    reverted_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_med_intake_events_created
+    ON medication_intake_events (created_at);
+
+  CREATE TABLE IF NOT EXISTS medication_intake_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    event_id INTEGER NOT NULL,
+    medication_id INTEGER,
+    medication_name TEXT NOT NULL,
+    dosage TEXT NOT NULL DEFAULT '',
+    scheduled_tablets REAL NOT NULL,
+    tablets_per_box REAL NOT NULL,
+    box_count_before REAL NOT NULL,
+    box_count_after REAL NOT NULL,
+    created_at INTEGER NOT NULL,
+    reverted_at INTEGER,
+    FOREIGN KEY (event_id) REFERENCES medication_intake_events(id) ON DELETE CASCADE,
+    FOREIGN KEY (medication_id) REFERENCES medications(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_med_intake_items_event
+    ON medication_intake_items (event_id);
 `;
 
 /** Current bundled schema revision (increment when adding migrations below). */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 async function applyMigrations(db) {
   const row = await db.getFirstAsync('PRAGMA user_version');

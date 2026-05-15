@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { getGlucoseDailyTrendBuckets } from '../db/glucoseReadings';
 import { colors } from '../theme/colors';
 
-const RANGE_MS = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const screenWidth = Dimensions.get('window').width;
 
 function formatDay(dayStr) {
@@ -34,12 +34,16 @@ export default function TrendsScreen() {
   const [buckets, setBuckets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedRange, setSelectedRange] = useState(30);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const since = Date.now() - RANGE_MS;
+      const since =
+  selectedRange === -1
+    ? 0
+    : Date.now() - selectedRange * DAY_MS;
       const rows = await getGlucoseDailyTrendBuckets(since);
       setBuckets(Array.isArray(rows) ? rows : []);
     } catch (e) {
@@ -49,7 +53,7 @@ export default function TrendsScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedRange]);
 
   useFocusEffect(
     useCallback(() => {
@@ -72,6 +76,23 @@ const maxBar = useMemo(() => {
   const vals = buckets.map((b) => Number(b.avg_v) || 0);
   const m = Math.max(0, ...vals);
   return Math.max(180, m * 1.1);
+}, [buckets]);
+const estimatedHbA1c = useMemo(() => {
+  if (!buckets.length) return null;
+
+  const vals = buckets
+    .map((b) => Number(b.avg_v))
+    .filter((v) => Number.isFinite(v));
+
+  if (!vals.length) return null;
+
+  const avg =
+    vals.reduce((s, v) => s + v, 0) / vals.length;
+
+  return {
+    avgGlucose: avg.toFixed(0),
+    a1c: ((avg + 46.7) / 28.7).toFixed(1),
+  };
 }, [buckets]);
 
   return (
@@ -113,6 +134,69 @@ const maxBar = useMemo(() => {
           contentContainerStyle={[styles.scroll, { paddingBottom: tabBarHeight + 24 }]}
           showsVerticalScrollIndicator={false}
         >
+        <View style={styles.rangeRow}>
+  {[7, 14, 30, 90].map((days) => (
+    <Pressable
+      key={days}
+      onPress={() => setSelectedRange(days)}
+      style={[
+        styles.rangeBtn,
+        selectedRange === days &&
+          styles.rangeBtnActive,
+      ]}
+    >
+      <Text
+        style={[
+          styles.rangeBtnText,
+          selectedRange === days &&
+            styles.rangeBtnTextActive,
+        ]}
+      >
+        {days}D
+      </Text>
+    </Pressable>
+  ))}
+
+  <Pressable
+    onPress={() => setSelectedRange(-1)}
+    style={[
+      styles.rangeBtn,
+      selectedRange === -1 &&
+        styles.rangeBtnActive,
+    ]}
+  >
+    <Text
+      style={[
+        styles.rangeBtnText,
+        selectedRange === -1 &&
+          styles.rangeBtnTextActive,
+      ]}
+    >
+      ALL
+    </Text>
+  </Pressable>
+</View>
+{estimatedHbA1c ? (
+  <View style={styles.a1cCard}>
+    <Text style={styles.a1cTitle}>
+      Estimated HbA1c
+    </Text>
+
+    <Text style={styles.a1cValue}>
+      {estimatedHbA1c.a1c}%
+    </Text>
+
+    <Text style={styles.a1cSub}>
+      Avg glucose: {estimatedHbA1c.avgGlucose} mg/dL
+    </Text>
+
+    <Text style={styles.a1cSub2}>
+      Based on {selectedRange === -1
+        ? 'all readings'
+        : `${selectedRange} day data`}
+    </Text>
+  </View>
+) : null}
           <Text style={styles.section}>Daily average (mg/dL)</Text>
           <LineChart
   data={chartData}
@@ -221,4 +305,68 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   rowMeta: { marginTop: 6, fontSize: 12, color: colors.textTertiary, fontWeight: '500' },
+  rangeRow: {
+  flexDirection: 'row',
+  marginBottom: 18,
+  gap: 10,
+},
+
+rangeBtn: {
+  paddingHorizontal: 14,
+  paddingVertical: 8,
+  borderRadius: 12,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: colors.border,
+},
+
+rangeBtnActive: {
+  backgroundColor: colors.accent,
+},
+
+rangeBtnText: {
+  color: colors.text,
+  fontWeight: '600',
+},
+
+rangeBtnTextActive: {
+  color: '#000',
+},
+a1cCard: {
+  backgroundColor: colors.surface,
+  borderRadius: 18,
+  padding: 20,
+  marginBottom: 20,
+  borderWidth: 1,
+  borderColor: colors.border,
+},
+
+a1cTitle: {
+  fontSize: 13,
+  fontWeight: '700',
+  color: colors.textSecondary,
+  textTransform: 'uppercase',
+  letterSpacing: 0.6,
+},
+
+a1cValue: {
+  marginTop: 10,
+  fontSize: 42,
+  fontWeight: '700',
+  color: colors.accent,
+  letterSpacing: -1,
+},
+
+a1cSub: {
+  marginTop: 8,
+  fontSize: 15,
+  color: colors.text,
+  fontWeight: '600',
+},
+
+a1cSub2: {
+  marginTop: 4,
+  fontSize: 13,
+  color: colors.textSecondary,
+},
 });

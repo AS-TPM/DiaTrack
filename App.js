@@ -27,10 +27,23 @@ const navTheme = {
   },
 };
 
+const linking = {
+  prefixes: ['diatrack://'],
+  config: {
+    screens: {
+      Home: 'home',
+      Log: 'log',
+      Meds: 'meds',
+      Trends: 'trends',
+      Profile: 'profile',
+    },
+  },
+};
+
 export default function App() {
   return (
     <SafeAreaProvider>
-      <NavigationContainer theme={navTheme}>
+      <NavigationContainer theme={navTheme} linking={linking}>
         <StatusBar style="light" />
         <Tab.Navigator
           screenOptions={{

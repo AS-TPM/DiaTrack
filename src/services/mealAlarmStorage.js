@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export const MEAL_ALARM_STORAGE_KEY = '@diatrack/meal_alarm_v1';
 
 /**
- * @typedef {{ mealStartMs: number, medicineAtMs: number, glucoseAtMs: number }} MealAlarmSession
+ * @typedef {{ mealStartMs: number, medicineAtMs: number, glucoseAtMs: number, mealType?: string, mealLabel?: string, intakeEventId?: number }} MealAlarmSession
  */
 
 /** @returns {Promise<MealAlarmSession | null>} */
@@ -19,7 +19,14 @@ export async function loadMealAlarmSession() {
     ) {
       return null;
     }
-    return p;
+    return {
+      mealStartMs: p.mealStartMs,
+      medicineAtMs: p.medicineAtMs,
+      glucoseAtMs: p.glucoseAtMs,
+      mealType: typeof p.mealType === 'string' ? p.mealType : undefined,
+      mealLabel: typeof p.mealLabel === 'string' ? p.mealLabel : undefined,
+      intakeEventId: typeof p.intakeEventId === 'number' ? p.intakeEventId : undefined,
+    };
   } catch {
     return null;
   }

@@ -4,8 +4,9 @@ import {
   cancelMealAlarmsNative,
   getExactAlarmStatusNative,
   isMealAlarmNativeAvailable,
+  openBatteryOptimizationSettingsNative,
   openExactAlarmSettingsNative,
-  scheduleMealAlarmsFromNative,
+  scheduleMealAlarmsAtTimesNative,
 } from 'expo-meal-alarms';
 import {
   clearMealAlarmSession,
@@ -15,6 +16,7 @@ import {
 
 const MED_MS = 30 * 60 * 1000;
 const GLU_MS = 2 * 60 * 60 * 1000;
+
 
 function formatRemaining(ms) {
   if (ms <= 0) return 'Due now';
@@ -54,7 +56,27 @@ export function useMealAlarmSession() {
     refreshExactStatus();
     if (s && Platform.OS === 'android' && isMealAlarmNativeAvailable()) {
       try {
-        scheduleMealAlarmsFromNative(s.mealStartMs);
+        const res = scheduleMealAlarmsAtTimesNative(
+          s.mealStartMs,
+          s.medicineAtMs,
+          s.glucoseAtMs
+        );
+        if (
+          Number.isFinite(res?.medicineAtMs) &&
+          Number.isFinite(res?.glucoseAtMs) &&
+          (res.medicineAtMs !== s.medicineAtMs || res.glucoseAtMs !== s.glucoseAtMs)
+        ) {
+          const corrected = {
+            mealStartMs: s.mealStartMs,
+            medicineAtMs: res.medicineAtMs,
+            glucoseAtMs: res.glucoseAtMs,
+            mealType: s.mealType,
+            mealLabel: s.mealLabel,
+            intakeEventId: s.intakeEventId,
+          };
+          await saveMealAlarmSession(corrected);
+          setSession(corrected);
+        }
       } catch (e) {
         console.warn('Meal alarm resync', e);
       }
@@ -93,25 +115,60 @@ export function useMealAlarmSession() {
     Platform.OS === 'android' &&
     isMealAlarmNativeAvailable() &&
     exactStatus?.hasNativeModule &&
+    exactStatus.alarmClockExactSupported !== true &&
     exactStatus.canScheduleExactAlarms === false;
 
-  const startMeal = useCallback(async () => {
+  const batteryOptimizationWarning =
+    Platform.OS === 'android' &&
+    isMealAlarmNativeAvailable() &&
+    exactStatus?.hasNativeModule &&
+    exactStatus.batteryOptimizationIgnored === false;
+
+  const startMeal = useCallback(async (meal = {}) => {
     const mealStartMs = Date.now();
     const medicineAtMs = mealStartMs + MED_MS;
     const glucoseAtMs = mealStartMs + GLU_MS;
+    const mealType = meal.mealType ?? 'custom';
+    const mealLabel = meal.mealLabel ?? 'Meal';
+    const intakeEventId = meal.intakeEventId;
 
-    await ensureAndroidNotificationPermission();
+    const notificationsGranted = await ensureAndroidNotificationPermission();
     refreshExactStatus();
 
-    const next = { mealStartMs, medicineAtMs, glucoseAtMs };
+    const next = { mealStartMs, medicineAtMs, glucoseAtMs, mealType, mealLabel, intakeEventId };
     await saveMealAlarmSession(next);
     setSession(next);
 
     if (Platform.OS === 'android' && isMealAlarmNativeAvailable()) {
       try {
-        const res = scheduleMealAlarmsFromNative(mealStartMs);
+        const res = scheduleMealAlarmsAtTimesNative(mealStartMs, medicineAtMs, glucoseAtMs);
+        const scheduled = {
+          mealStartMs,
+          medicineAtMs: res.medicineAtMs,
+          glucoseAtMs: res.glucoseAtMs,
+          mealType,
+          mealLabel,
+          intakeEventId,
+        };
+        await saveMealAlarmSession(scheduled);
+        setSession(scheduled);
         refreshExactStatus();
-        if (!res.canScheduleExactAlarms) {
+        if (!notificationsGranted || res.postNotificationsGranted === false) {
+          Alert.alert(
+            'Notifications disabled',
+            'Android notification permission is off for DiaTrack. The native alarm can fire, but the glucose reminder will not be visible until notifications are allowed.'
+          );
+        } else if (res.batteryOptimizationIgnored === false) {
+          const maker = String(res.manufacturer ?? '').trim();
+          Alert.alert(
+            'Allow background alarms',
+            `${maker || 'Android'} may delay DiaTrack reminders while battery optimization is on. Allow unrestricted battery use for DiaTrack so medication and glucose reminders stay reliable.`,
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Open settings', onPress: () => openBatteryOptimizationSettingsNative() },
+            ]
+          );
+        } else if (!res.canScheduleExactAlarms && res.alarmClockExactSupported !== true) {
           Alert.alert(
             'Exact alarms disabled',
             'Android is blocking exact alarms for DiaTrack. Open settings and allow “Alarms & reminders” (or “Schedule exact alarms”) so medication and glucose timers fire on time when the app is closed.',
@@ -152,7 +209,9 @@ export function useMealAlarmSession() {
     reload,
     nativeAlarmsAvailable: Platform.OS === 'android' && isMealAlarmNativeAvailable(),
     openExactAlarmSettings: openExactAlarmSettingsNative,
+    openBatteryOptimizationSettings: openBatteryOptimizationSettingsNative,
     exactAlarmBlocked,
+    batteryOptimizationWarning,
     refreshExactAlarmStatus: refreshExactStatus,
   };
 }

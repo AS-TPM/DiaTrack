@@ -1,6 +1,5 @@
 import * as IntentLauncher from 'expo-intent-launcher';
 import { useCallback, useState } from 'react';
-import { Linking } from 'react-native';
 import {
   View,
   Text,
@@ -10,6 +9,8 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -17,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { useMealAlarmSession } from '../hooks/useMealAlarmSession';
-import { listMedicationsWithSchedules } from '../db/medications';
+import { listMedicationsWithSchedules, logMealMedicationIntake } from '../db/medications';
 import {
   computeMedicationMetrics,
   formatDaysRemaining,
@@ -27,6 +28,14 @@ import {
 } from '../domain/medicationCalculations';
 import { getLatestGlucoseReading, getTodayGlucoseAggregate } from '../db/glucoseReadings';
 import GlucoseImportModal from '../components/GlucoseImportModal';
+
+const MEAL_OPTIONS = [
+  { type: 'breakfast', label: 'Breakfast', icon: 'sunny-outline' },
+  { type: 'lunch', label: 'Lunch', icon: 'partly-sunny-outline' },
+  { type: 'dinner', label: 'Dinner', icon: 'moon-outline' },
+  { type: 'snack', label: 'Snack', icon: 'cafe-outline' },
+  { type: 'custom', label: 'Custom', icon: 'options-outline' },
+];
 
 function formatRelativeTime(recordedAt) {
   if (!recordedAt || !Number.isFinite(recordedAt)) return '';
@@ -49,6 +58,87 @@ function StockBar({ percent, color }) {
   );
 }
 
+function MealStartModal({ visible, selectedType, customLabel, busy, onSelect, onCustomLabel, onClose, onConfirm }) {
+  const selected = MEAL_OPTIONS.find((m) => m.type === selectedType) ?? MEAL_OPTIONS[0];
+  const confirmLabel = selected.type === 'custom' && customLabel.trim() ? customLabel.trim() : selected.label;
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.mealModalRoot}>
+        <Pressable style={styles.mealModalBackdrop} onPress={busy ? undefined : onClose} />
+        <View style={styles.mealSheet}>
+          <View style={styles.mealSheetHandle} />
+          <View style={styles.mealSheetHeader}>
+            <View>
+              <Text style={styles.mealSheetTitle}>Start meal timers</Text>
+              <Text style={styles.mealSheetSub}>Choose the meal so only matching medication doses are deducted.</Text>
+            </View>
+            <Pressable onPress={onClose} disabled={busy} hitSlop={10}>
+              <Ionicons name="close" size={24} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+
+          <View style={styles.mealOptionGrid}>
+            {MEAL_OPTIONS.map((option) => {
+              const active = option.type === selectedType;
+              return (
+                <Pressable
+                  key={option.type}
+                  onPress={() => onSelect(option.type)}
+                  disabled={busy}
+                  style={[styles.mealOption, active && styles.mealOptionActive]}
+                >
+                  <Ionicons
+                    name={option.icon}
+                    size={20}
+                    color={active ? colors.accent : colors.textSecondary}
+                  />
+                  <Text style={[styles.mealOptionText, active && styles.mealOptionTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {selectedType === 'custom' ? (
+            <View style={styles.customMealBox}>
+              <Text style={styles.customMealLabel}>Custom label</Text>
+              <TextInput
+                value={customLabel}
+                onChangeText={onCustomLabel}
+                placeholder="e.g. Bedtime"
+                placeholderTextColor={colors.textTertiary}
+                style={styles.customMealInput}
+                editable={!busy}
+              />
+            </View>
+          ) : null}
+
+          <Pressable
+            onPress={onConfirm}
+            disabled={busy}
+            style={({ pressed }) => [
+              styles.mealConfirmBtn,
+              pressed && styles.mealConfirmBtnPressed,
+              busy && styles.mealConfirmBtnDisabled,
+            ]}
+          >
+            {busy ? (
+              <ActivityIndicator color="#041210" />
+            ) : (
+              <>
+                <Ionicons name="restaurant" size={20} color="#041210" />
+                <Text style={styles.mealConfirmText}>Start {confirmLabel}</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function DashboardScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -63,10 +153,16 @@ export default function DashboardScreen() {
     reload,
     nativeAlarmsAvailable,
     openExactAlarmSettings,
+    openBatteryOptimizationSettings,
     exactAlarmBlocked,
+    batteryOptimizationWarning,
   } = useMealAlarmSession();
 
   const [importOpen, setImportOpen] = useState(false);
+  const [mealPickerOpen, setMealPickerOpen] = useState(false);
+  const [selectedMealType, setSelectedMealType] = useState('breakfast');
+  const [customMealLabel, setCustomMealLabel] = useState('');
+  const [startingMeal, setStartingMeal] = useState(false);
   const [gLoading, setGLoading] = useState(true);
   const [gError, setGError] = useState(null);
   const [todayAgg, setTodayAgg] = useState(null);
@@ -110,8 +206,33 @@ export default function DashboardScreen() {
     }, [reload, loadMeds, loadGlucose])
   );
 
-const onIAte = useCallback(async () => {
-  await startMeal();
+const onIAte = useCallback(() => {
+  setMealPickerOpen(true);
+}, []);
+
+const confirmMealStart = useCallback(async () => {
+  if (startingMeal) return;
+  const selected = MEAL_OPTIONS.find((m) => m.type === selectedMealType) ?? MEAL_OPTIONS[0];
+  const mealLabel =
+    selected.type === 'custom' && customMealLabel.trim()
+      ? customMealLabel.trim()
+      : selected.label;
+
+  setStartingMeal(true);
+  try {
+    const mealStartedAt = Date.now();
+    const intake = await logMealMedicationIntake({
+      mealType: selected.type,
+      mealLabel,
+      mealStartedAt,
+    });
+    await startMeal({
+      mealType: selected.type,
+      mealLabel,
+      intakeEventId: intake.eventId,
+    });
+    await loadMeds();
+    setMealPickerOpen(false);
 
 if (Platform.OS === 'android') {
   try {
@@ -130,17 +251,31 @@ if (Platform.OS === 'android') {
   }
 }
 
-  Alert.alert(
-    'Meal start saved',
-    '30 minute meal timer started. Glucose reminder will continue inside the app.'
-  );
-}, [startMeal]);
+    const deductionText =
+      intake.deductedCount > 0
+        ? `${intake.deductedCount} medication${intake.deductedCount === 1 ? '' : 's'} deducted (${intake.totalTablets.toFixed(1)} tablets).`
+        : 'No medications were scheduled for this meal.';
+    Alert.alert(
+      `${mealLabel} started`,
+      `${deductionText} Medication and 2-hour glucose reminders were scheduled with Android alarms.`
+    );
+  } catch (e) {
+    console.error(e);
+    Alert.alert('Meal start failed', String(e?.message ?? e));
+  } finally {
+    setStartingMeal(false);
+  }
+}, [customMealLabel, loadMeds, selectedMealType, startMeal, startingMeal]);
 
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'short',
     day: 'numeric',
   });
+  const estimatedHbA1c =
+  todayAgg?.avg_v != null
+    ? ((Number(todayAgg.avg_v) + 46.7) / 28.7).toFixed(1)
+    : null;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -174,6 +309,7 @@ if (Platform.OS === 'android') {
         ) : gError ? (
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Glucose data</Text>
+
             <Text style={styles.gErr}>{gError}</Text>
             <Pressable onPress={loadGlucose} style={styles.retryGlucose}>
               <Text style={styles.retryGlucoseText}>Retry</Text>
@@ -216,6 +352,12 @@ if (Platform.OS === 'android') {
                     </Text>
                     <Text style={styles.avgUnit}>mg/dL avg</Text>
                   </View>
+                  {estimatedHbA1c ? (
+                    <View style={styles.a1cBox}>
+                      <Text style={styles.a1cLabel}>Estimated HbA1c</Text>
+                      <Text style={styles.a1cValue}>{estimatedHbA1c}%</Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.cardFoot}>
                     {Number(todayAgg.cnt)} reading{Number(todayAgg.cnt) === 1 ? '' : 's'} · min{' '}
                     {todayAgg.min_v != null ? Number(todayAgg.min_v).toFixed(0) : '—'} · max{' '}
@@ -335,7 +477,10 @@ if (Platform.OS === 'android') {
         {session ? (
           <View style={styles.timerCard}>
             <View style={styles.timerHeader}>
-              <Text style={styles.timerTitle}>Meal timers</Text>
+              <View>
+                <Text style={styles.timerTitle}>Meal timers</Text>
+                {session.mealLabel ? <Text style={styles.timerMealLabel}>{session.mealLabel}</Text> : null}
+              </View>
               <Pressable onPress={clearTimers} hitSlop={10}>
                 <Text style={styles.timerClear}>Clear</Text>
               </Pressable>
@@ -373,6 +518,15 @@ if (Platform.OS === 'android') {
                 </Text>
               </View>
             ) : null}
+            {batteryOptimizationWarning ? (
+              <Pressable onPress={openBatteryOptimizationSettings} style={styles.exactWarn}>
+                <Ionicons name="battery-half-outline" size={18} color={colors.high} />
+                <Text style={styles.exactWarnText}>
+                  Battery optimization is enabled. On Samsung and other Android devices, allow unrestricted battery use
+                  for DiaTrack to reduce missed reminders.
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 
@@ -397,6 +551,16 @@ if (Platform.OS === 'android') {
         visible={importOpen}
         onClose={() => setImportOpen(false)}
         onImported={loadGlucose}
+      />
+      <MealStartModal
+        visible={mealPickerOpen}
+        selectedType={selectedMealType}
+        customLabel={customMealLabel}
+        busy={startingMeal}
+        onSelect={setSelectedMealType}
+        onCustomLabel={setCustomMealLabel}
+        onClose={() => setMealPickerOpen(false)}
+        onConfirm={confirmMealStart}
       />
     </View>
   );
@@ -714,6 +878,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
+  timerMealLabel: {
+    marginTop: 3,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
   timerClear: {
     fontSize: 14,
     fontWeight: '600',
@@ -762,4 +932,142 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.accent,
   },
+  mealModalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  mealModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.62)',
+  },
+  mealSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  mealSheetHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 4,
+    backgroundColor: colors.borderStrong,
+    marginBottom: 16,
+  },
+  mealSheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 16,
+  },
+  mealSheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  mealSheetSub: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textSecondary,
+    maxWidth: 300,
+  },
+  mealOptionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 18,
+  },
+  mealOption: {
+    width: '48%',
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceHover,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  mealOptionActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  mealOptionText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  mealOptionTextActive: {
+    color: colors.text,
+  },
+  customMealBox: {
+    marginTop: 16,
+  },
+  customMealLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  customMealInput: {
+    marginTop: 8,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.background,
+    color: colors.text,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  mealConfirmBtn: {
+    marginTop: 18,
+    minHeight: 54,
+    borderRadius: 16,
+    backgroundColor: colors.ateCta,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  mealConfirmBtnPressed: {
+    backgroundColor: colors.ateCtaPressed,
+  },
+  mealConfirmBtnDisabled: {
+    opacity: 0.72,
+  },
+  mealConfirmText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#041210',
+  },
+  a1cBox: {
+  marginTop: 18,
+  paddingTop: 14,
+  borderTopWidth: 1,
+  borderTopColor: colors.border,
+},
+
+a1cLabel: {
+  fontSize: 12,
+  fontWeight: '700',
+  color: colors.textSecondary,
+  textTransform: 'uppercase',
+  letterSpacing: 0.5,
+},
+
+a1cValue: {
+  marginTop: 6,
+  fontSize: 28,
+  fontWeight: '700',
+  color: colors.accent,
+},
 });

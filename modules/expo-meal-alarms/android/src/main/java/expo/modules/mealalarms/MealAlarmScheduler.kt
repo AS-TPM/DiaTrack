@@ -19,10 +19,13 @@ object MealAlarmScheduler {
 
   const val MED_LAG_MS = 30L * 60L * 1000L
   const val GLU_LAG_MS = 2L * 60L * 60L * 1000L
+  const val ACTION_EXACT_ALARM_PERMISSION_CHANGED =
+    "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
 
   private const val RC_MED = 94001
   private const val RC_GLU = 94002
   private const val RC_SHOW_BASE = 9910
+  private const val ACTION_FIRE_ALARM = "expo.modules.mealalarms.FIRE_MEAL_ALARM"
 
   fun canScheduleExactAlarms(context: Context): Boolean {
     val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -48,18 +51,21 @@ object MealAlarmScheduler {
 
   /** @return true if every scheduled alarm used exact clock APIs (setAlarmClock / setExact). */
   fun schedule(context: Context, mealStartMs: Long): Boolean {
-    cancelAll(context)
-    val medAt = mealStartMs + MED_LAG_MS
-    val gluAt = mealStartMs + GLU_LAG_MS
-    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-      .putLong(KEY_MEAL_START, mealStartMs)
-      .putLong(KEY_MED_AT, medAt)
-      .putLong(KEY_GLU_AT, gluAt)
-      .apply()
-    return scheduleAlarmsIfFuture(context, medAt, gluAt)
+    return scheduleAtTimes(context, mealStartMs, mealStartMs + MED_LAG_MS, mealStartMs + GLU_LAG_MS)
   }
 
-  fun rescheduleAfterBoot(context: Context) {
+  /** @return true if every scheduled alarm used exact clock APIs (setAlarmClock / setExact). */
+  fun scheduleAtTimes(context: Context, mealStartMs: Long, medicineAtMs: Long, glucoseAtMs: Long): Boolean {
+    cancelAll(context)
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+      .putLong(KEY_MEAL_START, mealStartMs)
+      .putLong(KEY_MED_AT, medicineAtMs)
+      .putLong(KEY_GLU_AT, glucoseAtMs)
+      .apply()
+    return scheduleAlarmsIfFuture(context, medicineAtMs, glucoseAtMs)
+  }
+
+  fun reschedulePersistedAlarms(context: Context) {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val mealStart = prefs.getLong(KEY_MEAL_START, 0L)
     if (mealStart == 0L) {
@@ -88,7 +94,7 @@ object MealAlarmScheduler {
           RC_MED,
           medAt,
           "medicine",
-          "Medication reminder",
+          "DiaTrack medication reminder",
           "30 minutes after your meal — take your medication."
         )
       ) {
@@ -102,7 +108,7 @@ object MealAlarmScheduler {
           RC_GLU,
           gluAt,
           "glucose",
-          "Glucose check",
+          "DiaTrack glucose check",
           "2 hours after your meal — check your blood sugar."
         )
       ) {
@@ -127,6 +133,7 @@ object MealAlarmScheduler {
   ): Boolean {
     val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     val intent = Intent(context, MealAlarmReceiver::class.java).apply {
+      action = ACTION_FIRE_ALARM
       putExtra(MealAlarmReceiver.EXTRA_KIND, kind)
       putExtra(MealAlarmReceiver.EXTRA_TITLE, title)
       putExtra(MealAlarmReceiver.EXTRA_BODY, body)
@@ -181,7 +188,10 @@ object MealAlarmScheduler {
     val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     listOf(RC_MED, RC_GLU).forEach { rc ->
-      val intent = Intent(context, MealAlarmReceiver::class.java).setPackage(context.packageName)
+      val intent = Intent(context, MealAlarmReceiver::class.java).apply {
+        action = ACTION_FIRE_ALARM
+        setPackage(context.packageName)
+      }
       val pi = PendingIntent.getBroadcast(context, rc, intent, flags)
       am.cancel(pi)
       pi.cancel()
