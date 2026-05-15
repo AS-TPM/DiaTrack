@@ -10,7 +10,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,7 +38,7 @@ const DEFAULT_PROFILE = {
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const tabBarHeight = 80;
   const { session, medicineLabel, glucoseLabel, clearTimers } = useMealAlarmSession();
   const { colors, accent, setAccent, themePresets } = useTheme();
 

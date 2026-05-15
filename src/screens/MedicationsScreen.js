@@ -13,7 +13,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -326,7 +326,7 @@ function MedicationEditorModal({ visible, initial, onClose, onSaved }) {
 
 export default function MedicationsScreen() {
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const tabBarHeight = 80;
   const { colors } = useTheme();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

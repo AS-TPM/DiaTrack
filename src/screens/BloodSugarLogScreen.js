@@ -11,8 +11,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Vibration,
 } from 'react-native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,7 +39,7 @@ function formatWhen(ts) {
 
 export default function BloodSugarLogScreen() {
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const tabBarHeight = 80;
   const { colors } = useTheme();
   const [glucoseText, setGlucoseText] = useState('');
   const [mealContext, setMealContext] = useState(MEAL_CONTEXT_OPTIONS[0].value);
@@ -82,6 +83,7 @@ export default function BloodSugarLogScreen() {
     try {
       await insertGlucoseReading({ valueMgdl: n, mealContext });
       setGlucoseText('');
+      Vibration.vibrate(40);
       await loadHistory();
     } catch (e) {
       console.error(e);

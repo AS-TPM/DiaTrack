@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -15,7 +15,7 @@ import {
 } from './src/screens/TabScreens';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 
-const Tab = createBottomTabNavigator();
+const Tab = createMaterialTopTabNavigator();
 const Stack = createNativeStackNavigator();
 
 const linking = {
@@ -36,36 +36,77 @@ function MainTabs() {
   return (
     <Tab.Navigator
         screenOptions={{
-          headerShown: false,
-          tabBarStyle: {
-            position: 'absolute',
-            left: 14,
-            right: 14,
-            bottom: 12,
-            height: 64,
-            borderRadius: 28,
-            backgroundColor: colors.surfaceGlassy,
-            borderWidth: 1,
-            borderColor: colors.border,
-            shadowColor: '#000',
-            shadowOpacity: 0.16,
-            shadowRadius: 18,
-            shadowOffset: { width: 0, height: 10 },
-            elevation: 10,
-          },
-          tabBarActiveTintColor: colors.tabActive,
-          tabBarInactiveTintColor: colors.tabInactive,
-          tabBarLabelStyle: {
-            fontSize: 11,
-            fontWeight: '700',
-            letterSpacing: 0.5,
-          },
-        }}
+          tabBarShowLabel: false,
+          tabBarAllowFontScaling: false,
+  swipeEnabled: true,
+  animationEnabled: false,
+
+  tabBarPosition: 'bottom',
+  tabBarShowIcon: true,
+
+  tabBarPressColor: 'transparent',
+
+  sceneContainerStyle: {
+    backgroundColor: colors.background,
+  },
+
+  tabBarStyle: {
+    position: 'absolute',
+    paddingBottom: 0,
+    left: 14,
+    right: 14,
+    bottom: 18,
+
+    height: 58,
+    borderRadius: 28,
+
+    overflow: 'hidden',
+
+    backgroundColor: colors.surfaceGlassy,
+
+    borderWidth: 1,
+    borderColor: colors.border,
+
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+
+    elevation: 10,
+  },
+
+  tabBarIndicatorStyle: {
+    height: '40',
+    top: 6,
+    borderRadius: 200,
+    marginHorizontal: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 7,
+  },
+
+ tabBarItemStyle: {
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+  tabBarActiveTintColor: colors.accent,
+  tabBarInactiveTintColor: colors.tabInactive,
+
+  tabBarLabelStyle: {
+  fontSize: 10,
+  fontWeight: '700',
+},
+
+}}
       >
         <Tab.Screen
           name="Home"
           component={DashboardScreen}
           options={{
+            
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="home" size={size} color={color} />
             ),
@@ -84,7 +125,7 @@ function MainTabs() {
           name="Meds"
           component={MedsTabScreen}
           options={{
-            tabBarIcon: ({ color, size }) => (
+                        tabBarIcon: ({ color, size }) => (
               <Ionicons name="medkit-outline" size={size} color={color} />
             ),
           }}
@@ -93,6 +134,7 @@ function MainTabs() {
           name="Trends"
           component={TrendsTabScreen}
           options={{
+            
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="trending-up" size={size} color={color} />
             ),
@@ -102,6 +144,7 @@ function MainTabs() {
   name="Meals"
   component={MealsTabScreen}
   options={{
+    
     tabBarIcon: ({ color, size }) => (
       <Ionicons
         name="restaurant-outline"
@@ -115,6 +158,7 @@ function MainTabs() {
           name="Profile"
           component={ProfileTabScreen}
           options={{
+            
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="person-outline" size={size} color={color} />
             ),

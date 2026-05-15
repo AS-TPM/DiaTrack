@@ -13,7 +13,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -144,7 +144,7 @@ function MealStartModal({ visible, selectedType, customLabel, busy, onSelect, on
 export default function DashboardScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const tabBarHeight = 80;
   const { session, medicineLabel, glucoseLabel, startMeal, clearTimers, reload, nativeAlarmsAvailable, openExactAlarmSettings, exactAlarmBlocked } = useMealAlarmSession();
   const { colors } = useTheme();
 
