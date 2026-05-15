@@ -34,7 +34,8 @@ class ExpoMealAlarmsModule : Module() {
         "alarmClockExactSupported" to true,
         "postNotificationsGranted" to hasPostNotificationsPermission(ctx),
         "batteryOptimizationIgnored" to isIgnoringBatteryOptimizations(ctx),
-        "manufacturer" to Build.MANUFACTURER
+        "manufacturer" to Build.MANUFACTURER,
+        "isSamsung" to Build.MANUFACTURER.equals("samsung", true)
       )
     }
 
@@ -55,7 +56,8 @@ class ExpoMealAlarmsModule : Module() {
         "alarmClockExactSupported" to true,
         "postNotificationsGranted" to hasPostNotificationsPermission(ctx),
         "batteryOptimizationIgnored" to isIgnoringBatteryOptimizations(ctx),
-        "manufacturer" to Build.MANUFACTURER
+        "manufacturer" to Build.MANUFACTURER,
+        "isSamsung" to Build.MANUFACTURER.equals("samsung", true)
       )
     }
 
@@ -84,7 +86,8 @@ class ExpoMealAlarmsModule : Module() {
         "alarmClockExactSupported" to true,
         "postNotificationsGranted" to false,
         "batteryOptimizationIgnored" to false,
-        "manufacturer" to Build.MANUFACTURER
+        "manufacturer" to Build.MANUFACTURER,
+        "isSamsung" to Build.MANUFACTURER.equals("samsung", true)
       )
       val can = MealAlarmScheduler.canScheduleExactAlarms(ctx)
       mapOf(
@@ -94,7 +97,8 @@ class ExpoMealAlarmsModule : Module() {
         "alarmClockExactSupported" to true,
         "postNotificationsGranted" to hasPostNotificationsPermission(ctx),
         "batteryOptimizationIgnored" to isIgnoringBatteryOptimizations(ctx),
-        "manufacturer" to Build.MANUFACTURER
+        "manufacturer" to Build.MANUFACTURER,
+        "isSamsung" to Build.MANUFACTURER.equals("samsung", true)
       )
     }
 

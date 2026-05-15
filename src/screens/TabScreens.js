@@ -2,6 +2,7 @@ import PlaceholderScreen from './PlaceholderScreen';
 import BloodSugarLogScreen from './BloodSugarLogScreen';
 import MedicationsScreen from './MedicationsScreen';
 import TrendsScreen from './TrendsScreen';
+import MealLogScreen from './MealLogScreen';
 
 export function LogTabScreen() {
   return <BloodSugarLogScreen />;
@@ -13,6 +14,9 @@ export function MedsTabScreen() {
 
 export function TrendsTabScreen() {
   return <TrendsScreen />;
+}
+export function MealsTabScreen() {
+  return <MealLogScreen />;
 }
 
 export function ProfileTabScreen() {

@@ -69,10 +69,19 @@ const DDL = `
   );
   CREATE INDEX IF NOT EXISTS idx_med_intake_items_event
     ON medication_intake_items (event_id);
+    CREATE TABLE IF NOT EXISTS meal_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  meal_type TEXT,
+  meal_label TEXT,
+  started_at INTEGER,
+  glucose_check_time INTEGER,
+  medication_count INTEGER,
+  notes TEXT
+);
 `;
 
 /** Current bundled schema revision (increment when adding migrations below). */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 async function applyMigrations(db) {
   const row = await db.getFirstAsync('PRAGMA user_version');

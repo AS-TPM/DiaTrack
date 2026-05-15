@@ -1,5 +1,6 @@
 import * as IntentLauncher from 'expo-intent-launcher';
 import { useCallback, useState } from 'react';
+import { addMealLog } from '../db/mealLogs';
 import {
   View,
   Text,
@@ -7,16 +8,17 @@ import {
   ScrollView,
   Pressable,
   Alert,
-  Platform,
-  ActivityIndicator,
   Modal,
   TextInput,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
+import { colors as defaultColors } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
 import { useMealAlarmSession } from '../hooks/useMealAlarmSession';
 import { listMedicationsWithSchedules, logMealMedicationIntake } from '../db/medications';
 import {
@@ -71,10 +73,10 @@ function MealStartModal({ visible, selectedType, customLabel, busy, onSelect, on
           <View style={styles.mealSheetHeader}>
             <View>
               <Text style={styles.mealSheetTitle}>Start meal timers</Text>
-              <Text style={styles.mealSheetSub}>Choose the meal so only matching medication doses are deducted.</Text>
+              <Text style={styles.mealSheetSub}>Choose the meal so matching medication reminders stay aligned.</Text>
             </View>
             <Pressable onPress={onClose} disabled={busy} hitSlop={10}>
-              <Ionicons name="close" size={24} color={colors.textSecondary} />
+              <Ionicons name="close" size={24} color={defaultColors.textSecondary} />
             </Pressable>
           </View>
 
@@ -91,7 +93,7 @@ function MealStartModal({ visible, selectedType, customLabel, busy, onSelect, on
                   <Ionicons
                     name={option.icon}
                     size={20}
-                    color={active ? colors.accent : colors.textSecondary}
+                    color={active ? defaultColors.accent : defaultColors.textSecondary}
                   />
                   <Text style={[styles.mealOptionText, active && styles.mealOptionTextActive]}>
                     {option.label}
@@ -108,7 +110,7 @@ function MealStartModal({ visible, selectedType, customLabel, busy, onSelect, on
                 value={customLabel}
                 onChangeText={onCustomLabel}
                 placeholder="e.g. Bedtime"
-                placeholderTextColor={colors.textTertiary}
+                placeholderTextColor={defaultColors.textTertiary}
                 style={styles.customMealInput}
                 editable={!busy}
               />
@@ -143,20 +145,8 @@ export default function DashboardScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
-  const [medSummary, setMedSummary] = useState(() => summarizeInventory([]));
-  const {
-    session,
-    medicineLabel,
-    glucoseLabel,
-    startMeal,
-    clearTimers,
-    reload,
-    nativeAlarmsAvailable,
-    openExactAlarmSettings,
-    openBatteryOptimizationSettings,
-    exactAlarmBlocked,
-    batteryOptimizationWarning,
-  } = useMealAlarmSession();
+  const { session, medicineLabel, glucoseLabel, startMeal, clearTimers, reload, nativeAlarmsAvailable, openExactAlarmSettings, exactAlarmBlocked } = useMealAlarmSession();
+  const { colors } = useTheme();
 
   const [importOpen, setImportOpen] = useState(false);
   const [mealPickerOpen, setMealPickerOpen] = useState(false);
@@ -167,14 +157,12 @@ export default function DashboardScreen() {
   const [gError, setGError] = useState(null);
   const [todayAgg, setTodayAgg] = useState(null);
   const [latestReading, setLatestReading] = useState(null);
+  const [medSummary, setMedSummary] = useState(() => ({ medicationCount: 0, lowStockCount: 0, totalTabletsOnHand: 0, totalDailyTablets: 0, tightest: null }));
 
   const loadMeds = useCallback(async () => {
     try {
       const list = await listMedicationsWithSchedules();
-      const rows = list.map((med) => ({
-        med,
-        metrics: computeMedicationMetrics(med, med.scheduleEntries),
-      }));
+      const rows = list.map((med) => ({ med, metrics: computeMedicationMetrics(med, med.scheduleEntries) }));
       setMedSummary(summarizeInventory(rows));
     } catch (e) {
       console.warn('medications load', e);
@@ -206,352 +194,234 @@ export default function DashboardScreen() {
     }, [reload, loadMeds, loadGlucose])
   );
 
-const onIAte = useCallback(() => {
-  setMealPickerOpen(true);
-}, []);
+  const onIAte = useCallback(() => {
+    setMealPickerOpen(true);
+  }, []);
 
-const confirmMealStart = useCallback(async () => {
-  if (startingMeal) return;
-  const selected = MEAL_OPTIONS.find((m) => m.type === selectedMealType) ?? MEAL_OPTIONS[0];
-  const mealLabel =
-    selected.type === 'custom' && customMealLabel.trim()
-      ? customMealLabel.trim()
-      : selected.label;
+  const confirmMealStart = useCallback(async () => {
+    if (startingMeal) return;
+    const selected = MEAL_OPTIONS.find((m) => m.type === selectedMealType) ?? MEAL_OPTIONS[0];
+    const mealLabel = selected.type === 'custom' && customMealLabel.trim() ? customMealLabel.trim() : selected.label;
 
-  setStartingMeal(true);
-  try {
-    const mealStartedAt = Date.now();
-    const intake = await logMealMedicationIntake({
-      mealType: selected.type,
-      mealLabel,
-      mealStartedAt,
-    });
-    await startMeal({
-      mealType: selected.type,
-      mealLabel,
-      intakeEventId: intake.eventId,
-    });
-    await loadMeds();
-    setMealPickerOpen(false);
+    setStartingMeal(true);
+    try {
+      const mealStartedAt = Date.now();
+      const intake = await logMealMedicationIntake({ mealType: selected.type, mealLabel, mealStartedAt });
+      await startMeal({ mealType: selected.type, mealLabel, intakeEventId: intake.eventId });
+      await addMealLog({
+  meal_type: selected.type,
+  meal_label: mealLabel,
+  started_at: mealStartedAt,
+  glucose_check_time: mealStartedAt + (2 * 60 * 60 * 1000),
+  medication_count: intake.deductedCount,
+});
+      await loadMeds();
+      setMealPickerOpen(false);
 
-if (Platform.OS === 'android') {
-  try {
-    await IntentLauncher.startActivityAsync(
-      'android.intent.action.SET_TIMER',
-      {
-        extra: {
-          'android.intent.extra.alarm.LENGTH': 1800,
-          'android.intent.extra.alarm.MESSAGE': 'Meal Timer',
-          'android.intent.extra.alarm.SKIP_UI': false,
-        },
+      if (Platform.OS === 'android') {
+        try {
+          await IntentLauncher.startActivityAsync('android.intent.action.SET_TIMER', {
+            extra: {
+              'android.intent.extra.alarm.LENGTH': 1800,
+              'android.intent.extra.alarm.MESSAGE': 'Meal Timer',
+              'android.intent.extra.alarm.SKIP_UI': false,
+            },
+          });
+        } catch (e) {
+          console.log('Failed to open native timer', e);
+        }
       }
-    );
-  } catch (e) {
-    console.log('Failed to open native timer', e);
-  }
-}
 
-    const deductionText =
-      intake.deductedCount > 0
+      const deductionText = intake.deductedCount > 0
         ? `${intake.deductedCount} medication${intake.deductedCount === 1 ? '' : 's'} deducted (${intake.totalTablets.toFixed(1)} tablets).`
         : 'No medications were scheduled for this meal.';
-    Alert.alert(
-      `${mealLabel} started`,
-      `${deductionText} Medication and 2-hour glucose reminders were scheduled with Android alarms.`
-    );
-  } catch (e) {
-    console.error(e);
-    Alert.alert('Meal start failed', String(e?.message ?? e));
-  } finally {
-    setStartingMeal(false);
-  }
-}, [customMealLabel, loadMeds, selectedMealType, startMeal, startingMeal]);
 
-  const today = new Date().toLocaleDateString(undefined, {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  });
-  const estimatedHbA1c =
-  todayAgg?.avg_v != null
-    ? ((Number(todayAgg.avg_v) + 46.7) / 28.7).toFixed(1)
-    : null;
+      Alert.alert(`${mealLabel} started`, `${deductionText} Medication and 2-hour glucose reminders were scheduled with Android alarms.`);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Meal start failed', String(e?.message ?? e));
+    } finally {
+      setStartingMeal(false);
+    }
+  }, [customMealLabel, loadMeds, selectedMealType, startMeal, startingMeal]);
+
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const estimatedHbA1c = todayAgg?.avg_v != null ? ((Number(todayAgg.avg_v) + 46.7) / 28.7).toFixed(1) : null;
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingBottom: tabBarHeight + 24 },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
+    <View style={[styles.root, { paddingTop: insets.top, backgroundColor: colors.background }]}> 
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: tabBarHeight + 24 }]} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Dashboard</Text>
-            <Text style={styles.date}>{today}</Text>
+            <Text style={[styles.greeting, { color: colors.text }]}>Dashboard</Text>
+            <Text style={[styles.date, { color: colors.textSecondary }]}>{today}</Text>
           </View>
           <View style={styles.headerActions}>
-            <Pressable onPress={() => setImportOpen(true)} style={styles.headerIconBtn}>
+            <Pressable onPress={() => setImportOpen(true)} style={[styles.headerIconBtn, { borderColor: colors.border }]}>
               <Ionicons name="download-outline" size={22} color={colors.accent} />
             </Pressable>
-            <View style={styles.avatar}>
+            <View style={[styles.avatar, { backgroundColor: colors.surfaceHover, borderColor: colors.border }]}>
               <Ionicons name="pulse" size={22} color={colors.accent} />
             </View>
           </View>
         </View>
 
-        {gLoading ? (
-          <View style={[styles.card, styles.cardLoading]}>
-            <ActivityIndicator color={colors.accent} />
-            <Text style={styles.loadingGlucose}>Loading glucose data…</Text>
+        <View style={[styles.topCards, { borderColor: colors.border }]}> 
+          <View style={[styles.topCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Text style={[styles.cardLabel, { color: colors.textSecondary }]}>Today's average</Text>
+            <Text style={[styles.cardMetric, { color: colors.text }]}>{todayAgg?.avg_v != null ? Number(todayAgg.avg_v).toFixed(0) : '—'}</Text>
+            <Text style={[styles.cardSub, { color: colors.textSecondary }]}>
+              {todayAgg?.cnt ? `${todayAgg.cnt} readings · ${todayAgg.min_v?.toFixed(0) ?? '—'}/${todayAgg.max_v?.toFixed(0) ?? '—'}` : 'No readings today'}
+            </Text>
           </View>
-        ) : gError ? (
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>Glucose data</Text>
-
-            <Text style={styles.gErr}>{gError}</Text>
-            <Pressable onPress={loadGlucose} style={styles.retryGlucose}>
-              <Text style={styles.retryGlucoseText}>Retry</Text>
-            </Pressable>
+          <View style={[styles.topCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Text style={[styles.cardLabel, { color: colors.textSecondary }]}>Latest reading</Text>
+            <Text style={[styles.cardMetric, { color: colors.text }]}>{latestReading ? Number(latestReading.value_mgdl).toFixed(0) : '—'}</Text>
+            <Text style={[styles.cardSub, { color: colors.textSecondary }]}>{latestReading ? formatRelativeTime(latestReading.recorded_at) : 'No log yet'}</Text>
           </View>
-        ) : (
-          <>
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardLabel}>Today's glucose</Text>
-                {(() => {
-                  const cnt = Number(todayAgg?.cnt ?? 0);
-                  const avg = todayAgg?.avg_v != null ? Number(todayAgg.avg_v) : null;
-                  const inRange =
-                    avg != null && Number.isFinite(avg) && avg >= 70 && avg <= 180;
-                  if (!cnt) {
-                    return (
-                      <View style={styles.badgeMuted}>
-                        <Text style={styles.badgeMutedText}>No data today</Text>
-                      </View>
-                    );
-                  }
-                  return (
-                    <View style={[styles.badge, inRange ? styles.badgeOk : styles.badgeWarn]}>
-                      <View style={[styles.badgeDot, inRange ? styles.badgeDotOk : styles.badgeDotWarn]} />
-                      <Text style={[styles.badgeText, inRange ? styles.badgeTextOk : styles.badgeTextWarn]}>
-                        {inRange ? 'In range' : 'Out of range'}
-                      </Text>
-                    </View>
-                  );
-                })()}
-              </View>
-              {Number(todayAgg?.cnt ?? 0) === 0 ? (
-                <Text style={styles.emptyGlucose}>No readings logged for today yet.</Text>
-              ) : (
-                <>
-                  <View style={styles.avgRow}>
-                    <Text style={styles.avgValue}>
-                      {Number(todayAgg.avg_v).toFixed(0)}
-                    </Text>
-                    <Text style={styles.avgUnit}>mg/dL avg</Text>
-                  </View>
-                  {estimatedHbA1c ? (
-                    <View style={styles.a1cBox}>
-                      <Text style={styles.a1cLabel}>Estimated HbA1c</Text>
-                      <Text style={styles.a1cValue}>{estimatedHbA1c}%</Text>
-                    </View>
-                  ) : null}
-                  <Text style={styles.cardFoot}>
-                    {Number(todayAgg.cnt)} reading{Number(todayAgg.cnt) === 1 ? '' : 's'} · min{' '}
-                    {todayAgg.min_v != null ? Number(todayAgg.min_v).toFixed(0) : '—'} · max{' '}
-                    {todayAgg.max_v != null ? Number(todayAgg.max_v).toFixed(0) : '—'} mg/dL
-                  </Text>
-                </>
-              )}
-            </View>
+          <View style={[styles.topCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Text style={[styles.cardLabel, { color: colors.textSecondary }]}>Meal status</Text>
+            <Text style={[styles.cardMetric, { color: colors.text }]}>{session ? 'Active' : 'Idle'}</Text>
+            <Text style={[styles.cardSub, { color: colors.textSecondary }]}>{session ? `${session.mealLabel}` : 'Start a meal to track reminders'}</Text>
+          </View>
+        </View>
 
-            <View style={styles.card}>
-              <Text style={styles.cardLabel}>Latest reading</Text>
-              {!latestReading ? (
-                <Text style={styles.emptyGlucose}>No readings in your log yet. Use Log or import CSV.</Text>
-              ) : (
-                <>
-                  <View style={styles.latestRow}>
-                    <Text style={styles.latestValue}>
-                      {Number(latestReading.value_mgdl).toFixed(0)}
-                    </Text>
-                    <Text style={styles.latestUnit}>mg/dL</Text>
-                  </View>
-                  <View style={styles.latestMeta}>
-                    <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
-                    <Text style={styles.latestTime}>
-                      {formatRelativeTime(latestReading.recorded_at)}
-                    </Text>
-                  </View>
-                </>
-              )}
-            </View>
-          </>
-        )}
+        <View style={[styles.actionsGrid, { borderColor: colors.border }]}> 
+          <Pressable
+  style={[
+    styles.actionCard,
+    {
+      backgroundColor: `${colors.accent}15`,
+      borderColor: `${colors.accent}40`,
+      shadowColor: colors.accent,
+      borderWidth: 6,
+    },
+  ]}
+  onPress={onIAte}
+>
+  <Ionicons
+    name="restaurant"
+    size={24}
+    color={colors.accent}
+  />
 
-        <Pressable onPress={() => setImportOpen(true)} style={styles.importRow}>
-          <Ionicons name="document-text-outline" size={18} color={colors.accent} />
-          <Text style={styles.importRowText}>Import mySugr CSV</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-        </Pressable>
+  <Text
+    style={[
+      styles.actionTitle,
+      { color: colors.text },
+    ]}
+  >
+    Start meal timer
+  </Text>
 
-        <Text style={styles.sectionLabel}>Medication stock</Text>
+  <Text
+    style={[
+      styles.actionCopy,
+      { color: colors.textSecondary },
+    ]}
+  >
+    Schedule medication and glucose reminders that stay in sync.
+  </Text>
+</Pressable>
+          <Pressable style={[styles.actionCard, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Meds')}>
+            <Ionicons name="medkit-outline" size={22} color={colors.accent} />
+            <Text style={[styles.actionTitle, { color: colors.text }]}>Review meds</Text>
+            <Text style={[styles.actionCopy, { color: colors.textSecondary }]}>See current stock, low supply alerts, and how many tablets remain.</Text>
+          </Pressable>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Medication stock</Text>
         {medSummary.medicationCount === 0 ? (
           <Pressable
             onPress={() => navigation.navigate('Meds')}
-            style={({ pressed }) => [styles.invCard, pressed && styles.invCardPressed]}
+            style={[styles.invCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
           >
             <View style={styles.invRow}>
               <Ionicons name="medkit-outline" size={22} color={colors.accent} />
               <View style={styles.invTextCol}>
-                <Text style={styles.invTitle}>Track your medications</Text>
-                <Text style={styles.invSub}>
-                  Add inventory, dosage, and daily schedules — estimates update automatically.
-                </Text>
+                <Text style={[styles.invTitle, { color: colors.text }]}>Track your medications</Text>
+                <Text style={[styles.invSub, { color: colors.textSecondary }]}>Add inventory, schedule doses, and keep stock estimates in one premium view.</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </View>
           </Pressable>
         ) : (
-          <>
-            <Pressable
-              onPress={() => navigation.navigate('Meds')}
-              style={({ pressed }) => [styles.invCard, pressed && styles.invCardPressed]}
-            >
-              <View style={styles.invCardHeader}>
-                <Text style={styles.invCardTitle}>Inventory overview</Text>
-                <Text style={styles.invChev}>Meds</Text>
+          <View style={[styles.invCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <View style={styles.invCardHeader}>
+              <Text style={[styles.invCardTitle, { color: colors.text }]}>Inventory overview</Text>
+              <Text style={[styles.invChev, { color: colors.textSecondary }]}>Meds</Text>
+            </View>
+            <Text style={[styles.invStats, { color: colors.text }]}>
+              {medSummary.medicationCount} medication{medSummary.medicationCount !== 1 ? 's' : ''} · {Math.round(medSummary.totalTabletsOnHand)} tablets on hand
+            </Text>
+            <Text style={[styles.invStats, { color: colors.textSecondary }]}>~{medSummary.totalDailyTablets.toFixed(1)} tablets / day combined</Text>
+            {medSummary.lowStockCount > 0 ? (
+              <View style={styles.invWarn}>
+                <Ionicons name="warning-outline" size={16} color={defaultColors.high} />
+                <Text style={[styles.invWarnText, { color: defaultColors.high }]}> {medSummary.lowStockCount} below {LOW_STOCK_DAYS}-day supply</Text>
               </View>
-              <Text style={styles.invStats}>
-                {medSummary.medicationCount} medication
-                {medSummary.medicationCount !== 1 ? 's' : ''} ·{' '}
-                {Math.round(medSummary.totalTabletsOnHand)} tablets on hand
-              </Text>
-              <Text style={styles.invStats}>
-                ~{medSummary.totalDailyTablets.toFixed(1)} tablets / day combined
-              </Text>
-              {medSummary.lowStockCount > 0 ? (
-                <View style={styles.invWarn}>
-                  <Ionicons name="warning-outline" size={16} color={colors.high} />
-                  <Text style={styles.invWarnText}>
-                    {medSummary.lowStockCount} below {LOW_STOCK_DAYS}-day supply at current pace
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.invOk}>All medications above {LOW_STOCK_DAYS}-day supply.</Text>
-              )}
-            </Pressable>
-
-            {medSummary.tightest ? (
-              <Pressable
-                onPress={() => navigation.navigate('Meds')}
-                style={({ pressed }) => [styles.invCard, styles.invCardSecond, pressed && styles.invCardPressed]}
-              >
-                <Text style={styles.invCardTitle}>Shortest runway</Text>
-                <Text style={styles.invTightName}>{medSummary.tightest.med.name}</Text>
-                <Text style={styles.invTightMeta}>
-                  ~{formatDaysRemaining(medSummary.tightest.metrics.daysRemaining)} remaining ·{' '}
-                  {medSummary.tightest.metrics.tabletsPerDay.toFixed(1)} tabs/day
-                </Text>
-                <Text style={styles.invBarLabel}>
-                  Supply vs {SUPPLY_BAR_TARGET_DAYS} days ({Math.round(medSummary.tightest.metrics.remainingPercent)}%)
-                </Text>
-                <StockBar
-                  percent={medSummary.tightest.metrics.supplyBarPercent}
-                  color={medSummary.tightest.metrics.isLowStock ? colors.high : colors.accent}
-                />
-              </Pressable>
             ) : (
-              <View style={[styles.invCard, styles.invCardSecond]}>
-                <Text style={styles.invCardTitle}>Schedules needed</Text>
-                <Text style={styles.invSub}>
-                  Add breakfast / lunch / dinner or custom times in Meds to estimate days left per drug.
-                </Text>
-              </View>
+              <Text style={[styles.invOk, { color: colors.textSecondary }]}>All medications above {LOW_STOCK_DAYS}-day supply.</Text>
             )}
-          </>
+          </View>
         )}
 
+        {medSummary.tightest ? (
+          <View style={[styles.invCard, styles.invCardSecond, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Text style={[styles.invCardTitle, { color: colors.text }]}>Shortest runway</Text>
+            <Text style={[styles.invTightName, { color: colors.text }]}>{medSummary.tightest.med.name}</Text>
+            <Text style={[styles.invTightMeta, { color: colors.textSecondary }]}>
+              ~{formatDaysRemaining(medSummary.tightest.metrics.daysRemaining)} remaining · {medSummary.tightest.metrics.tabletsPerDay.toFixed(1)} tabs/day
+            </Text>
+            <Text style={[styles.invBarLabel, { color: colors.textSecondary }]}>Supply vs {SUPPLY_BAR_TARGET_DAYS} days ({Math.round(medSummary.tightest.metrics.remainingPercent)}%)</Text>
+            <StockBar percent={medSummary.tightest.metrics.supplyBarPercent} color={medSummary.tightest.metrics.isLowStock ? defaultColors.high : colors.accent} />
+          </View>
+        ) : null}
+
         {session ? (
-          <View style={styles.timerCard}>
+          <View style={[styles.timerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
             <View style={styles.timerHeader}>
               <View>
-                <Text style={styles.timerTitle}>Meal timers</Text>
-                {session.mealLabel ? <Text style={styles.timerMealLabel}>{session.mealLabel}</Text> : null}
+                <Text style={[styles.timerTitle, { color: colors.text }]}>Meal timers</Text>
+                {session.mealLabel ? <Text style={[styles.timerMealLabel, { color: colors.textSecondary }]}>{session.mealLabel}</Text> : null}
               </View>
               <Pressable onPress={clearTimers} hitSlop={10}>
-                <Text style={styles.timerClear}>Clear</Text>
+                <Text style={[styles.timerClear, { color: colors.accent }]}>Clear</Text>
               </Pressable>
             </View>
-            <View style={styles.timerRow}>
+            <View style={[styles.timerRow, { borderTopColor: colors.border }]}> 
               <Ionicons name="medical" size={20} color={colors.accent} />
               <View style={styles.timerTextCol}>
-                <Text style={styles.timerLabel}>Medicine reminder</Text>
-                <Text style={styles.timerValue}>{medicineLabel}</Text>
+                <Text style={[styles.timerLabel, { color: colors.textSecondary }]}>Medicine reminder</Text>
+                <Text style={[styles.timerValue, { color: colors.text }]}>{medicineLabel}</Text>
               </View>
             </View>
-            <View style={[styles.timerRow, styles.timerRowSecond]}>
+            <View style={[styles.timerRow, styles.timerRowSecond, { borderTopColor: colors.border }]}> 
               <Ionicons name="water" size={20} color={colors.low} />
               <View style={styles.timerTextCol}>
-                <Text style={styles.timerLabel}>Glucose test reminder</Text>
-                <Text style={styles.timerValue}>{glucoseLabel}</Text>
+                <Text style={[styles.timerLabel, { color: colors.textSecondary }]}>Glucose test reminder</Text>
+                <Text style={[styles.timerValue, { color: colors.text }]}>{glucoseLabel}</Text>
               </View>
             </View>
             {Platform.OS === 'android' && !nativeAlarmsAvailable ? (
-              <Text style={styles.timerFoot}>
-                Native alarms require a development build (Expo Go does not ship this module).
-              </Text>
+              <Text style={[styles.timerFoot, { color: colors.textSecondary }]}>Native alarms require a development build.</Text>
             ) : null}
             {Platform.OS === 'android' && nativeAlarmsAvailable ? (
               <Pressable onPress={openExactAlarmSettings} style={styles.exactLink}>
-                <Text style={styles.exactLinkText}>Exact alarm permission…</Text>
+                <Text style={[styles.exactLinkText, { color: colors.accent }]}>Exact alarm permission…</Text>
               </Pressable>
             ) : null}
             {exactAlarmBlocked ? (
               <View style={styles.exactWarn}>
-                <Ionicons name="alert-circle" size={18} color={colors.high} />
-                <Text style={styles.exactWarnText}>
-                  Exact alarms are blocked by Android. Meal reminders may be delayed until you allow them in system
-                  settings.
-                </Text>
+                <Ionicons name="alert-circle" size={18} color={defaultColors.high} />
+                <Text style={[styles.exactWarnText, { color: defaultColors.high }]}>Exact alarms are blocked by Android. Reminders may be delayed until you allow them in settings.</Text>
               </View>
-            ) : null}
-            {batteryOptimizationWarning ? (
-              <Pressable onPress={openBatteryOptimizationSettings} style={styles.exactWarn}>
-                <Ionicons name="battery-half-outline" size={18} color={colors.high} />
-                <Text style={styles.exactWarnText}>
-                  Battery optimization is enabled. On Samsung and other Android devices, allow unrestricted battery use
-                  for DiaTrack to reduce missed reminders.
-                </Text>
-              </Pressable>
             ) : null}
           </View>
         ) : null}
-
-        <Pressable
-          onPress={onIAte}
-          style={({ pressed }) => [
-            styles.ateButton,
-            pressed && styles.ateButtonPressed,
-          ]}
-        >
-          <Ionicons name="restaurant" size={22} color="#0c0a06" />
-          <Text style={styles.ateLabel}>I Ate</Text>
-        </Pressable>
-
-        <Text style={styles.hint}>
-          Tap when you begin eating. On Android (dev build), AlarmManager schedules medication and
-          glucose test alarms; timers persist across restarts.
-        </Text>
       </ScrollView>
 
-      <GlucoseImportModal
-        visible={importOpen}
-        onClose={() => setImportOpen(false)}
-        onImported={loadGlucose}
-      />
+      <GlucoseImportModal visible={importOpen} onClose={() => setImportOpen(false)} />
       <MealStartModal
         visible={mealPickerOpen}
         selectedType={selectedMealType}
@@ -567,507 +437,164 @@ if (Platform.OS === 'android') {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scroll: {
-    paddingHorizontal: 20,
-    paddingBottom: 28,
-  },
+  root: { flex: 1 },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 24,
-    marginTop: 8,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 18,
   },
-  greeting: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.5,
-  },
-  date: {
-    marginTop: 4,
-    fontSize: 15,
-    color: colors.textSecondary,
-    fontWeight: '500',
-  },
-  headerActions: { flexDirection: 'row', alignItems: 'center' },
+  greeting: { fontSize: 26, fontWeight: '800', letterSpacing: -0.6 },
+  date: { marginTop: 4, fontSize: 14, fontWeight: '500' },
+  headerActions: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   headerIconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginRight: 10,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardLoading: { alignItems: 'center', paddingVertical: 24 },
-  loadingGlucose: { marginTop: 10, fontSize: 14, color: colors.textSecondary },
-  gErr: { marginTop: 8, fontSize: 14, color: colors.high },
-  retryGlucose: { marginTop: 12, alignSelf: 'flex-start' },
-  retryGlucoseText: { fontSize: 15, fontWeight: '700', color: colors.accent },
-  emptyGlucose: { marginTop: 8, fontSize: 15, color: colors.textSecondary, lineHeight: 22 },
-  importRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    marginBottom: 12,
-    backgroundColor: colors.surface,
+    width: 46,
+    height: 46,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  importRowText: { flex: 1, marginLeft: 10, fontSize: 15, fontWeight: '600', color: colors.text },
-  badgeMuted: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: colors.surfaceHover,
-  },
-  badgeMutedText: { fontSize: 12, fontWeight: '600', color: colors.textTertiary },
-  badgeOk: { backgroundColor: 'rgba(110, 231, 183, 0.12)' },
-  badgeWarn: { backgroundColor: 'rgba(251, 146, 60, 0.15)' },
-  badgeDotOk: { backgroundColor: colors.inRange },
-  badgeDotWarn: { backgroundColor: colors.high },
-  badgeTextOk: { color: colors.inRange },
-  badgeTextWarn: { color: colors.high },
-  exactWarn: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(251, 146, 60, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(251, 146, 60, 0.35)',
-  },
-  exactWarnText: {
-    flex: 1,
-    marginLeft: 10,
-    fontSize: 13,
-    color: colors.high,
-    fontWeight: '600',
-    lineHeight: 18,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  cardLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    flex: 1,
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(110, 231, 183, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  badgeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.inRange,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.inRange,
-  },
-  avgRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-  },
-  avgValue: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -1,
-  },
-  avgUnit: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  cardFoot: {
-    marginTop: 14,
-    fontSize: 14,
-    color: colors.textTertiary,
-  },
-  latestRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-    marginTop: 4,
-  },
-  latestValue: {
-    fontSize: 40,
-    fontWeight: '700',
-    color: colors.accent,
-    letterSpacing: -0.5,
-  },
-  latestUnit: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  latestMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 14,
-  },
-  latestTime: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    fontWeight: '500',
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 10,
-    marginTop: 4,
-  },
-  invCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  invCardSecond: {
-    marginBottom: 14,
-  },
-  invCardPressed: {
-    opacity: 0.92,
-  },
-  invRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  invTextCol: { flex: 1, marginLeft: 12, marginRight: 8 },
-  invTitle: { fontSize: 16, fontWeight: '700', color: colors.text },
-  invSub: { marginTop: 6, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
-  invCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  invCardTitle: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
-  invChev: { fontSize: 13, fontWeight: '700', color: colors.accent },
-  invStats: { marginTop: 4, fontSize: 14, color: colors.text, fontWeight: '600' },
-  invWarn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    backgroundColor: 'rgba(251, 146, 60, 0.12)',
-    padding: 10,
-    borderRadius: 12,
-  },
-  invWarnText: { flex: 1, marginLeft: 8, fontSize: 13, fontWeight: '600', color: colors.high, lineHeight: 18 },
-  invOk: { marginTop: 10, fontSize: 13, color: colors.inRange, fontWeight: '600' },
-  invTightName: { marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text },
-  invTightMeta: { marginTop: 4, fontSize: 14, color: colors.textSecondary, fontWeight: '500' },
-  invBarLabel: {
-    marginTop: 12,
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  stockBarTrack: {
-    height: 8,
-    borderRadius: 6,
-    backgroundColor: colors.background,
-    marginTop: 6,
-    overflow: 'hidden',
-  },
-  stockBarFill: {
-    height: '100%',
-    borderRadius: 6,
-  },
-  ateButton: {
-    marginTop: 8,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    backgroundColor: colors.ateCta,
-    paddingVertical: 16,
-    borderRadius: 16,
-    shadowColor: colors.ateCta,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    elevation: 6,
-  },
-  ateButtonPressed: {
-    backgroundColor: colors.ateCtaPressed,
-    transform: [{ scale: 0.99 }],
-  },
-  ateLabel: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#0c0a06',
-    letterSpacing: 0.2,
-  },
-  hint: {
-    marginTop: 12,
-    textAlign: 'center',
-    fontSize: 13,
-    color: colors.textTertiary,
-    lineHeight: 18,
-    paddingHorizontal: 8,
-  },
-  timerCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 14,
     borderWidth: 1,
-    borderColor: colors.border,
   },
-  timerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  timerTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  timerMealLabel: {
-    marginTop: 3,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  timerClear: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  timerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  timerRowSecond: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  timerTextCol: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  timerLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  timerValue: {
-    marginTop: 4,
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.text,
-    fontVariant: ['tabular-nums'],
-  },
-  timerFoot: {
-    marginTop: 12,
-    fontSize: 12,
-    color: colors.textTertiary,
-    lineHeight: 16,
-  },
-  exactLink: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
-  },
-  exactLinkText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.accent,
-  },
-  mealModalRoot: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  mealModalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.62)',
-  },
-  mealSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 24,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-  },
-  mealSheetHandle: {
-    alignSelf: 'center',
-    width: 42,
-    height: 4,
-    borderRadius: 4,
-    backgroundColor: colors.borderStrong,
-    marginBottom: 16,
-  },
-  mealSheetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 16,
-  },
-  mealSheetTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  mealSheetSub: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 18,
-    color: colors.textSecondary,
-    maxWidth: 300,
-  },
-  mealOptionGrid: {
+  scroll: { paddingHorizontal: 20 },
+  topCards: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginTop: 18,
+    marginBottom: 16,
   },
+  topCard: {
+    flex: 1,
+    minWidth: '48%',
+    borderRadius: 18,
+    padding: 15,
+    borderWidth: 1,
+  },
+  cardLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 },
+  cardMetric: { fontSize: 28, fontWeight: '800', lineHeight: 32 },
+  cardSub: { marginTop: 10, fontSize: 13, lineHeight: 20 },
+  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  actionCard: {
+    flex: 1,
+    minWidth: '48%',
+    borderRadius: 18,
+    padding: 15,
+    borderWidth: 1,
+  },
+  actionTitle: { marginTop: 10, fontSize: 16, fontWeight: '700' },
+  actionCopy: { marginTop: 8, fontSize: 13, lineHeight: 18 },
+  sectionLabel: { marginTop: 2, marginBottom: 10, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
+  invCard: {
+    borderRadius: 18,
+    padding: 15,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  invRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  invTextCol: { flex: 1 },
+  invTitle: { fontSize: 16, fontWeight: '800' },
+  invSub: { marginTop: 6, fontSize: 13, lineHeight: 20 },
+  invChev: { fontSize: 13, fontWeight: '700' },
+  invStats: { marginTop: 8, fontSize: 13, lineHeight: 20 },
+  invWarn: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  invWarnText: { fontSize: 13, lineHeight: 20, fontWeight: '700' },
+  invOk: { marginTop: 12, fontSize: 13, lineHeight: 20 },
+  invCardSecond: { marginBottom: 16 },
+  invTightName: { marginTop: 8, fontSize: 18, fontWeight: '800' },
+  invTightMeta: { marginTop: 6, fontSize: 13, lineHeight: 20 },
+  invBarLabel: { marginTop: 12, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 },
+  stockBarTrack: { height: 10, borderRadius: 6, backgroundColor: '#0a0c10', overflow: 'hidden', marginTop: 8 },
+  stockBarFill: { height: '100%', borderRadius: 6 },
+  timerCard: {
+    borderRadius: 18,
+    padding: 26,
+    borderWidth: 1,
+    marginBottom: 30,
+  },
+  timerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  timerTitle: { fontSize: 16, fontWeight: '800' },
+  timerMealLabel: { marginTop: 4, fontSize: 13 },
+  timerClear: { fontSize: 14, fontWeight: '700' },
+  timerRow: { marginTop: 18, flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 18 },
+  timerRowSecond: { borderTopWidth: 1 },
+  timerTextCol: { flex: 1 },
+  timerLabel: { fontSize: 13, fontWeight: '700' },
+  timerValue: { marginTop: 4, fontSize: 15, fontWeight: '700' },
+  timerFoot: { marginTop: 12, fontSize: 12, lineHeight: 18 },
+  exactLink: { marginTop: 14 },
+  exactLinkText: { fontSize: 14, fontWeight: '700' },
+  exactWarn: { marginTop: 14, flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  exactWarnText: { flex: 1, fontSize: 12, lineHeight: 18 },
+  mealModalRoot: { flex: 1, justifyContent: 'flex-end' },
+  mealModalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  mealSheet: {
+    backgroundColor: defaultColors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: defaultColors.border,
+  },
+  mealSheetHandle: {
+    width: 48,
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignSelf: 'center',
+    marginBottom: 18,
+  },
+  mealSheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+  mealSheetTitle: { fontSize: 18, fontWeight: '800', color: defaultColors.text },
+  mealSheetSub: { marginTop: 4, fontSize: 13, lineHeight: 20, color: defaultColors.textSecondary, maxWidth: '78%' },
+  mealOptionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
   mealOption: {
     width: '48%',
-    minHeight: 54,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceHover,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: defaultColors.border,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    backgroundColor: defaultColors.surface,
+    alignItems: 'center',
+    gap: 8,
   },
   mealOptionActive: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
+    borderColor: defaultColors.accent,
+    backgroundColor: 'rgba(94,230,208,0.1)',
   },
-  mealOptionText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  mealOptionTextActive: {
-    color: colors.text,
-  },
-  customMealBox: {
-    marginTop: 16,
-  },
-  customMealLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
+  mealOptionText: { marginTop: 4, fontSize: 13, color: defaultColors.text },
+  mealOptionTextActive: { color: defaultColors.accent, fontWeight: '700' },
+  customMealBox: { marginBottom: 14 },
+  customMealLabel: { color: defaultColors.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8 },
   customMealInput: {
-    marginTop: 8,
-    height: 48,
-    borderRadius: 12,
+    backgroundColor: defaultColors.background,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.background,
-    color: colors.text,
+    borderColor: defaultColors.border,
     paddingHorizontal: 14,
-    fontSize: 15,
-    fontWeight: '600',
+    paddingVertical: 14,
+    color: defaultColors.text,
+    fontSize: 16,
   },
   mealConfirmBtn: {
-    marginTop: 18,
-    minHeight: 54,
-    borderRadius: 16,
-    backgroundColor: colors.ateCta,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 18,
+    paddingVertical: 16,
+    backgroundColor: defaultColors.accent,
   },
-  mealConfirmBtnPressed: {
-    backgroundColor: colors.ateCtaPressed,
-  },
-  mealConfirmBtnDisabled: {
-    opacity: 0.72,
-  },
-  mealConfirmText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#041210',
-  },
-  a1cBox: {
-  marginTop: 18,
-  paddingTop: 14,
-  borderTopWidth: 1,
-  borderTopColor: colors.border,
-},
-
-a1cLabel: {
-  fontSize: 12,
-  fontWeight: '700',
-  color: colors.textSecondary,
-  textTransform: 'uppercase',
-  letterSpacing: 0.5,
-},
-
-a1cValue: {
-  marginTop: 6,
-  fontSize: 28,
-  fontWeight: '700',
-  color: colors.accent,
-},
+  mealConfirmBtnPressed: { opacity: 0.92 },
+  mealConfirmBtnDisabled: { opacity: 0.7 },
+  mealConfirmText: { color: '#041210', fontSize: 15, fontWeight: '800' },
 });

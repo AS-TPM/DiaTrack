@@ -172,10 +172,10 @@ object MealAlarmScheduler {
   private fun scheduleInexactFallback(am: AlarmManager, atMs: Long, operation: PendingIntent): Boolean {
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
+        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, operation)
       } else {
         @Suppress("DEPRECATION")
-        am.set(AlarmManager.RTC_WAKEUP, atMs, operation)
+        am.setExact(AlarmManager.RTC_WAKEUP, atMs, operation)
       }
       return false
     } catch (e: Exception) {

@@ -31,27 +31,28 @@ class MealAlarmReceiver : BroadcastReceiver() {
       ensureChannels(appCtx)
       val nm = appCtx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-      val contentPi = buildContentIntent(appCtx, kind)
+        val contentPi = buildContentIntent(appCtx, kind)
 
       val alarmUri: Uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
       val channelId = channelIdForKind(kind)
       val openLabel = if (kind == KIND_GLUCOSE) "Log glucose" else "Open medications"
+      val smallIcon = appCtx.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info
 
       val notification = NotificationCompat.Builder(appCtx, channelId)
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
+        .setSmallIcon(smallIcon)
         .setContentTitle(title)
         .setContentText(body)
         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
         .setContentIntent(contentPi)
-        .setAutoCancel(false)
-        .setOngoing(true)
+        .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_MAX)
         .setCategory(NotificationCompat.CATEGORY_ALARM)
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         .setSound(alarmUri)
         .setLights(Color.WHITE, 500, 500)
         .setVibrate(VIBRATION_PATTERN)
+        .setDefaults(NotificationCompat.DEFAULT_ALL)
         .addAction(android.R.drawable.ic_menu_view, openLabel, contentPi)
         .build()
 
@@ -97,7 +98,8 @@ class MealAlarmReceiver : BroadcastReceiver() {
       ChannelSpec(CHANNEL_ID_MEDICINE, "DiaTrack medication reminders", "Medication reminders after meals"),
       ChannelSpec(CHANNEL_ID_GLUCOSE, "DiaTrack glucose reminders", "Post-meal glucose check reminders")
     ).forEach { spec ->
-      if (nm.getNotificationChannel(spec.id) == null) {
+      val existing = nm.getNotificationChannel(spec.id)
+      if (existing == null) {
         val channel = NotificationChannel(
           spec.id,
           spec.name,
@@ -110,8 +112,38 @@ class MealAlarmReceiver : BroadcastReceiver() {
           enableLights(true)
           lightColor = Color.WHITE
           lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+          setBypassDnd(true)
         }
         nm.createNotificationChannel(channel)
+      } else {
+        var needsUpdate = false
+        if (existing.importance != NotificationManager.IMPORTANCE_HIGH) {
+          existing.importance = NotificationManager.IMPORTANCE_HIGH
+          needsUpdate = true
+        }
+        if (existing.vibrationPattern == null || existing.vibrationPattern.contentEquals(VIBRATION_PATTERN).not()) {
+          existing.vibrationPattern = VIBRATION_PATTERN
+          needsUpdate = true
+        }
+        if (existing.sound == null) {
+          existing.setSound(soundUri, attrs)
+          needsUpdate = true
+        }
+        if (existing.lightColor != Color.WHITE) {
+          existing.lightColor = Color.WHITE
+          needsUpdate = true
+        }
+        if (existing.lockscreenVisibility != android.app.Notification.VISIBILITY_PUBLIC) {
+          existing.lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+          needsUpdate = true
+        }
+        if (!existing.canBypassDnd()) {
+          existing.setBypassDnd(true)
+          needsUpdate = true
+        }
+        if (needsUpdate) {
+          nm.createNotificationChannel(existing)
+        }
       }
     }
   }
