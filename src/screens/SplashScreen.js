@@ -22,6 +22,9 @@ export default function SplashScreen({ navigation }) {
       <Text style={styles.subtitle}>
         Smart glucose tracking
       </Text>
+      <Text style={styles.branding}>
+        Made By ASTPM
+      </Text>
     </View>
   );
 }
@@ -50,6 +53,12 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: 8,
     fontSize: 15,
+    color: '#9CA3AF',
+  },
+
+  branding: {
+    marginTop: 10,
+    fontSize: 12,
     color: '#9CA3AF',
   },
 });

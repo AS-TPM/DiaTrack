@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Alert, PermissionsAndroid, Platform } from 'react-native';
-import {
-  cancelMealAlarmsNative,
-  getExactAlarmStatusNative,
-  isMealAlarmNativeAvailable,
-  openBatteryOptimizationSettingsNative,
-  openExactAlarmSettingsNative,
-  scheduleMealAlarmsAtTimesNative,
-} from 'expo-meal-alarms';
+import { AppState } from 'react-native';
 import {
   clearMealAlarmSession,
   loadMealAlarmSession,
@@ -16,7 +8,6 @@ import {
 
 const MED_MS = 30 * 60 * 1000;
 const GLU_MS = 2 * 60 * 60 * 1000;
-
 
 function formatRemaining(ms) {
   if (ms <= 0) return 'Due now';
@@ -29,59 +20,14 @@ function formatRemaining(ms) {
   return `${sec}s`;
 }
 
-async function ensureAndroidNotificationPermission() {
-  if (Platform.OS !== 'android' || Platform.Version < 33) return true;
-  const res = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-  );
-  return res === PermissionsAndroid.RESULTS.GRANTED;
-}
-
 export function useMealAlarmSession() {
   const [session, setSession] = useState(null);
   const [now, setNow] = useState(() => Date.now());
-  const [exactStatus, setExactStatus] = useState(() =>
-    Platform.OS === 'android' ? getExactAlarmStatusNative() : null
-  );
-
-  const refreshExactStatus = useCallback(() => {
-    if (Platform.OS === 'android' && isMealAlarmNativeAvailable()) {
-      setExactStatus(getExactAlarmStatusNative());
-    }
-  }, []);
 
   const reload = useCallback(async () => {
     const s = await loadMealAlarmSession();
     setSession(s);
-    refreshExactStatus();
-    if (s && Platform.OS === 'android' && isMealAlarmNativeAvailable()) {
-      try {
-        const res = scheduleMealAlarmsAtTimesNative(
-          s.mealStartMs,
-          s.medicineAtMs,
-          s.glucoseAtMs
-        );
-        if (
-          Number.isFinite(res?.medicineAtMs) &&
-          Number.isFinite(res?.glucoseAtMs) &&
-          (res.medicineAtMs !== s.medicineAtMs || res.glucoseAtMs !== s.glucoseAtMs)
-        ) {
-          const corrected = {
-            mealStartMs: s.mealStartMs,
-            medicineAtMs: res.medicineAtMs,
-            glucoseAtMs: res.glucoseAtMs,
-            mealType: s.mealType,
-            mealLabel: s.mealLabel,
-            intakeEventId: s.intakeEventId,
-          };
-          await saveMealAlarmSession(corrected);
-          setSession(corrected);
-        }
-      } catch (e) {
-        console.warn('Meal alarm resync', e);
-      }
-    }
-  }, [refreshExactStatus]);
+  }, []);
 
   useEffect(() => {
     reload();
@@ -91,11 +37,10 @@ export function useMealAlarmSession() {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         reload();
-        refreshExactStatus();
       }
     });
     return () => sub.remove();
-  }, [reload, refreshExactStatus]);
+  }, [reload]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -111,19 +56,6 @@ export function useMealAlarmSession() {
     [session, now]
   );
 
-  const exactAlarmBlocked =
-    Platform.OS === 'android' &&
-    isMealAlarmNativeAvailable() &&
-    exactStatus?.hasNativeModule &&
-    exactStatus.alarmClockExactSupported !== true &&
-    exactStatus.canScheduleExactAlarms === false;
-
-  const batteryOptimizationWarning =
-    Platform.OS === 'android' &&
-    isMealAlarmNativeAvailable() &&
-    exactStatus?.hasNativeModule &&
-    exactStatus.batteryOptimizationIgnored === false;
-
   const startMeal = useCallback(async (meal = {}) => {
     const mealStartMs = Date.now();
     const medicineAtMs = mealStartMs + MED_MS;
@@ -132,71 +64,21 @@ export function useMealAlarmSession() {
     const mealLabel = meal.mealLabel ?? 'Meal';
     const intakeEventId = meal.intakeEventId;
 
-    const notificationsGranted = await ensureAndroidNotificationPermission();
-    refreshExactStatus();
+    const next = {
+      mealStartMs,
+      medicineAtMs,
+      glucoseAtMs,
+      mealType,
+      mealLabel,
+      intakeEventId,
+    };
 
-    const next = { mealStartMs, medicineAtMs, glucoseAtMs, mealType, mealLabel, intakeEventId };
     await saveMealAlarmSession(next);
     setSession(next);
-
-    if (Platform.OS === 'android' && isMealAlarmNativeAvailable()) {
-      try {
-        const res = scheduleMealAlarmsAtTimesNative(mealStartMs, medicineAtMs, glucoseAtMs);
-        const scheduled = {
-          mealStartMs,
-          medicineAtMs: res.medicineAtMs,
-          glucoseAtMs: res.glucoseAtMs,
-          mealType,
-          mealLabel,
-          intakeEventId,
-        };
-        await saveMealAlarmSession(scheduled);
-        setSession(scheduled);
-        refreshExactStatus();
-        if (!notificationsGranted || res.postNotificationsGranted === false) {
-          Alert.alert(
-            'Notifications disabled',
-            'Android notification permission is off for DiaTrack. The native alarm can fire, but the glucose reminder will not be visible until notifications are allowed.'
-          );
-        } else if (res.batteryOptimizationIgnored === false) {
-          const maker = String(res.manufacturer ?? '').trim();
-          Alert.alert(
-            'Allow background alarms',
-            `${maker || 'Android'} may delay DiaTrack reminders while battery optimization is on. Allow unrestricted battery use for DiaTrack so medication and glucose reminders stay reliable.`,
-            [
-              { text: 'Not now', style: 'cancel' },
-              { text: 'Open settings', onPress: () => openBatteryOptimizationSettingsNative() },
-            ]
-          );
-        } else if (!res.canScheduleExactAlarms && res.alarmClockExactSupported !== true) {
-          Alert.alert(
-            'Exact alarms disabled',
-            'Android is blocking exact alarms for DiaTrack. Open settings and allow “Alarms & reminders” (or “Schedule exact alarms”) so medication and glucose timers fire on time when the app is closed.',
-            [
-              { text: 'Not now', style: 'cancel' },
-              { text: 'Open settings', onPress: () => openExactAlarmSettingsNative() },
-            ]
-          );
-        } else if (res.allExactAlarms === false) {
-          Alert.alert(
-            'Alarms scheduled (reduced accuracy)',
-            'Exact clock alarms were denied once; backup scheduling was used. They may be a few minutes late. Grant exact alarm permission for best results.',
-            [
-              { text: 'OK', style: 'cancel' },
-              { text: 'Permission', onPress: () => openExactAlarmSettingsNative() },
-            ]
-          );
-        }
-      } catch (e) {
-        console.error(e);
-        Alert.alert('Alarm scheduling failed', String(e?.message ?? e));
-      }
-    }
-  }, [refreshExactStatus]);
+  }, []);
 
   const clearTimers = useCallback(async () => {
     await clearMealAlarmSession();
-    cancelMealAlarmsNative();
     setSession(null);
   }, []);
 
@@ -207,11 +89,5 @@ export function useMealAlarmSession() {
     startMeal,
     clearTimers,
     reload,
-    nativeAlarmsAvailable: Platform.OS === 'android' && isMealAlarmNativeAvailable(),
-    openExactAlarmSettings: openExactAlarmSettingsNative,
-    openBatteryOptimizationSettings: openBatteryOptimizationSettingsNative,
-    exactAlarmBlocked,
-    batteryOptimizationWarning,
-    refreshExactAlarmStatus: refreshExactStatus,
   };
 }

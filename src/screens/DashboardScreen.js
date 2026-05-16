@@ -1,5 +1,5 @@
-import * as IntentLauncher from 'expo-intent-launcher';
 import { useCallback, useState } from 'react';
+import { launchAndroidTimer } from '../services/timerLauncher';
 import { addMealLog } from '../db/mealLogs';
 import {
   View,
@@ -145,7 +145,7 @@ export default function DashboardScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const tabBarHeight = 80;
-  const { session, medicineLabel, glucoseLabel, startMeal, clearTimers, reload, nativeAlarmsAvailable, openExactAlarmSettings, exactAlarmBlocked } = useMealAlarmSession();
+  const { session, medicineLabel, glucoseLabel, startMeal, clearTimers, reload } = useMealAlarmSession();
   const { colors } = useTheme();
 
   const [importOpen, setImportOpen] = useState(false);
@@ -219,17 +219,10 @@ export default function DashboardScreen() {
       setMealPickerOpen(false);
 
       if (Platform.OS === 'android') {
-        try {
-          await IntentLauncher.startActivityAsync('android.intent.action.SET_TIMER', {
-            extra: {
-              'android.intent.extra.alarm.LENGTH': 1800,
-              'android.intent.extra.alarm.MESSAGE': 'Meal Timer',
-              'android.intent.extra.alarm.SKIP_UI': false,
-            },
-          });
-        } catch (e) {
-          console.log('Failed to open native timer', e);
-        }
+        console.log('Attempting Android timer launch', { durationSeconds: 1800, label: 'Meal Timer' });
+        launchAndroidTimer(1800, 'Meal Timer').catch((e) => {
+          console.warn('Timer launch background error:', e);
+        });
       }
 
       const deductionText = intake.deductedCount > 0
@@ -403,20 +396,6 @@ export default function DashboardScreen() {
                 <Text style={[styles.timerValue, { color: colors.text }]}>{glucoseLabel}</Text>
               </View>
             </View>
-            {Platform.OS === 'android' && !nativeAlarmsAvailable ? (
-              <Text style={[styles.timerFoot, { color: colors.textSecondary }]}>Native alarms require a development build.</Text>
-            ) : null}
-            {Platform.OS === 'android' && nativeAlarmsAvailable ? (
-              <Pressable onPress={openExactAlarmSettings} style={styles.exactLink}>
-                <Text style={[styles.exactLinkText, { color: colors.accent }]}>Exact alarm permission…</Text>
-              </Pressable>
-            ) : null}
-            {exactAlarmBlocked ? (
-              <View style={styles.exactWarn}>
-                <Ionicons name="alert-circle" size={18} color={defaultColors.high} />
-                <Text style={[styles.exactWarnText, { color: defaultColors.high }]}>Exact alarms are blocked by Android. Reminders may be delayed until you allow them in settings.</Text>
-              </View>
-            ) : null}
           </View>
         ) : null}
       </ScrollView>

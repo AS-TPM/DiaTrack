@@ -251,6 +251,10 @@ export default function ProfileScreen() {
             <Ionicons name="medkit-outline" size={20} color={colors.accent} />
           </Pressable>
         </View>
+
+        <View style={styles.brandingWrap}>
+          <Text style={[styles.brandingText, { color: colors.textSecondary }]}>Made By ASTPM</Text>
+        </View>
       </ScrollView>
 
       <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => setEditOpen(false)}>
@@ -572,5 +576,14 @@ const styles = StyleSheet.create({
   modalButtonText: {
     fontSize: 15,
     fontWeight: '700',
+  },
+  brandingWrap: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  brandingText: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
 });
