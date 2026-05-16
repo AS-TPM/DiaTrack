@@ -1,18 +1,33 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { launchAndroidTimer } from '../services/timerLauncher';
 import { addMealLog } from '../db/mealLogs';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
+  insertCustomReminder,
+  listCustomReminders,
+  updateCustomReminder,
+  deleteCustomReminder,
+  REMINDER_TYPES,
+  REMINDER_MEAL_TYPES,
+} from '../db/reminders';
+import ReminderCreatorModal from '../components/ReminderCreatorModal';
+import {
+  Animated,
   Alert,
+  LayoutAnimation,
+  PanResponder,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  UIManager,
+  Vibration,
+  View,
   Modal,
   TextInput,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
+import { Snackbar } from 'react-native-paper';
 
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -141,6 +156,101 @@ function MealStartModal({ visible, selectedType, customLabel, busy, onSelect, on
   );
 }
 
+const REMINDER_TYPE_LABELS = {
+  [REMINDER_TYPES.MEDICATION]: 'Medication',
+  [REMINDER_TYPES.GLUCOSE]: 'Post-meal glucose',
+};
+
+const MEAL_LABELS = {
+  breakfast: 'Breakfast',
+  lunch: 'Lunch',
+  dinner: 'Dinner',
+  snack: 'Snack',
+  custom: 'Custom',
+};
+
+function ReminderCard({ reminder, onDelete, onEdit, onToggle, colors }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const typeColor = reminder.reminder_type === REMINDER_TYPES.GLUCOSE ? colors.low : colors.accent;
+  const isBeforeMeal = reminder.reminder_type === REMINDER_TYPES.MEDICATION && reminder.meal_type !== REMINDER_MEAL_TYPES.CUSTOM;
+  const mealLabel = MEAL_LABELS[reminder.meal_type] || 'Custom';
+  const reminderTypeLabel = reminder.meal_type === REMINDER_MEAL_TYPES.CUSTOM && reminder.reminder_type !== REMINDER_TYPES.GLUCOSE
+    ? 'Custom'
+    : REMINDER_TYPE_LABELS[reminder.reminder_type] ?? 'Medication';
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 10,
+    onPanResponderMove: (_, gestureState) => {
+      if (gestureState.dx < 0) {
+        translateX.setValue(Math.max(gestureState.dx, -120));
+      }
+    },
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dx < -90) {
+        Animated.timing(translateX, {
+          toValue: -120,
+          duration: 180,
+          useNativeDriver: true,
+        }).start(() => {
+          onDelete(reminder);
+          translateX.setValue(0);
+        });
+      } else {
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      }
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+      }).start();
+    },
+  }), [onDelete, reminder, translateX]);
+
+  return (
+    <View style={styles.reminderCardOuter}>
+      <View style={[styles.reminderActionBackdrop, { backgroundColor: '#ff5e5e' }]}> 
+        <Ionicons name="trash-outline" size={22} color="#fff" />
+      </View>
+      <Animated.View
+        style={[
+          styles.reminderCard,
+          { backgroundColor: colors.surface, borderColor: colors.border, transform: [{ translateX }] },
+        ]}
+        {...panResponder.panHandlers}
+      >
+        <View style={styles.reminderDetails}>
+          <View style={[styles.typePill, { borderColor: `${typeColor}44`, backgroundColor: `${typeColor}18` }]}> 
+            <Text style={[styles.typePillText, { color: typeColor }]}>{reminderTypeLabel}</Text>
+          </View>
+          <Text style={[styles.reminderLabel, { color: colors.text }]} numberOfLines={2}>{reminder.label}</Text>
+          <View style={styles.reminderMetaRow}>
+            <Text style={[styles.reminderMeta, { color: colors.textSecondary }]}>{`${reminder.duration_minutes} min`}</Text>
+            <Text style={[styles.reminderMeta, { color: colors.textSecondary }]}>{mealLabel}</Text>
+            {isBeforeMeal ? (
+              <View style={[styles.badge, { borderColor: typeColor }]}> 
+                <Text style={[styles.badgeText, { color: typeColor }]}>Before meal</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+        <View style={styles.reminderActionGroup}>
+          <Pressable onPress={() => onToggle(reminder)} style={({ pressed }) => [styles.iconBtn, pressed && styles.iconPressed]}> 
+            <Ionicons name={reminder.enabled ? 'toggle-sharp' : 'toggle-outline'} size={22} color={reminder.enabled ? colors.accent : colors.textSecondary} />
+          </Pressable>
+          <Pressable onPress={() => onEdit(reminder)} style={({ pressed }) => [styles.iconBtn, pressed && styles.iconPressed]}> 
+            <Ionicons name="create-outline" size={22} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function DashboardScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -153,6 +263,11 @@ export default function DashboardScreen() {
   const [selectedMealType, setSelectedMealType] = useState('breakfast');
   const [customMealLabel, setCustomMealLabel] = useState('');
   const [startingMeal, setStartingMeal] = useState(false);
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [reminders, setReminders] = useState([]);
+  const [editingReminder, setEditingReminder] = useState(null);
+  const [snackVisible, setSnackVisible] = useState(false);
+  const [deletedReminder, setDeletedReminder] = useState(null);
   const [gLoading, setGLoading] = useState(true);
   const [gError, setGError] = useState(null);
   const [todayAgg, setTodayAgg] = useState(null);
@@ -186,12 +301,97 @@ export default function DashboardScreen() {
     }
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  const animateLayout = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+  }, []);
+
+  const loadReminders = useCallback(async () => {
+    try {
+      const list = await listCustomReminders();
+      setReminders(Array.isArray(list) ? list : []);
+      animateLayout();
+    } catch (e) {
+      console.warn('reminder load', e);
+    }
+  }, [animateLayout]);
+
+  const handleEditReminder = useCallback((reminder) => {
+    setEditingReminder(reminder);
+    setReminderOpen(true);
+  }, []);
+
+  const handleToggleReminder = useCallback(async (reminder) => {
+    try {
+      await updateCustomReminder(reminder.id, {
+        ...reminder,
+        enabled: !reminder.enabled,
+      });
+      await loadReminders();
+      animateLayout();
+    } catch (e) {
+      console.error('toggle reminder', e);
+    }
+  }, [loadReminders, animateLayout]);
+
+  const handleDeleteReminder = useCallback(async (reminder) => {
+    if (!reminder) return;
+    Vibration.vibrate(40);
+    setDeletedReminder(reminder);
+
+    try {
+      await deleteCustomReminder(reminder.id);
+      await loadReminders();
+      animateLayout();
+      setSnackVisible(true);
+    } catch (e) {
+      console.error('delete reminder', e);
+    }
+  }, [loadReminders, animateLayout]);
+
+  const handleUndoDelete = useCallback(async () => {
+    if (!deletedReminder) return;
+
+    try {
+      await insertCustomReminder({
+        label: deletedReminder.label,
+        reminder_type: deletedReminder.reminder_type,
+        meal_type: deletedReminder.meal_type,
+        duration_minutes: Number(deletedReminder.duration_minutes) || 0,
+        enabled: deletedReminder.enabled,
+        use_clock: deletedReminder.use_clock,
+      });
+      setDeletedReminder(null);
+      await loadReminders();
+      animateLayout();
+      setSnackVisible(false);
+    } catch (e) {
+      console.error('undo reminder delete', e);
+    }
+  }, [deletedReminder, loadReminders, animateLayout]);
+
+  const handleReminderSaved = useCallback(async () => {
+    await loadReminders();
+    setEditingReminder(null);
+  }, [loadReminders]);
+
+  const handleReminderClose = useCallback(() => {
+    setReminderOpen(false);
+    setEditingReminder(null);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       reload();
       loadMeds();
       loadGlucose();
-    }, [reload, loadMeds, loadGlucose])
+      loadReminders();
+    }, [reload, loadMeds, loadGlucose, loadReminders])
   );
 
   const onIAte = useCallback(() => {
@@ -200,6 +400,10 @@ export default function DashboardScreen() {
 
   const confirmMealStart = useCallback(async () => {
     if (startingMeal) return;
+    if (session) {
+      Alert.alert('Meal timer active', 'A meal session is already in progress. Clear it before starting a new one.');
+      return;
+    }
     const selected = MEAL_OPTIONS.find((m) => m.type === selectedMealType) ?? MEAL_OPTIONS[0];
     const mealLabel = selected.type === 'custom' && customMealLabel.trim() ? customMealLabel.trim() : selected.label;
 
@@ -316,11 +520,41 @@ export default function DashboardScreen() {
     Schedule medication and glucose reminders that stay in sync.
   </Text>
 </Pressable>
-          <Pressable style={[styles.actionCard, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Meds')}>
-            <Ionicons name="medkit-outline" size={22} color={colors.accent} />
-            <Text style={[styles.actionTitle, { color: colors.text }]}>Review meds</Text>
-            <Text style={[styles.actionCopy, { color: colors.textSecondary }]}>See current stock, low supply alerts, and how many tablets remain.</Text>
+          <Pressable style={[styles.actionCard, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => { setEditingReminder(null); setReminderOpen(true); }}>
+            <Ionicons name="alarm-outline" size={22} color={colors.accent} />
+            <Text style={[styles.actionTitle, { color: colors.text }]}>Create reminder</Text>
+            <Text style={[styles.actionCopy, { color: colors.textSecondary }]}>Add medication or post-meal reminders with custom labels and timer support.</Text>
           </Pressable>
+        </View>
+
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Saved reminders</Text>
+        <View style={[styles.reminderSection, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+          {reminders.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No reminders yet</Text>
+              <Text style={[styles.emptyCopy, { color: colors.textSecondary }]}>Create medication or glucose reminders to stay on top of your care.</Text>
+              <Pressable
+                onPress={() => {
+                  setEditingReminder(null);
+                  setReminderOpen(true);
+                }}
+                style={[styles.createButton, { backgroundColor: colors.accent }]}
+              >
+                <Text style={styles.createButtonText}>Create reminder</Text>
+              </Pressable>
+            </View>
+          ) : (
+            reminders.map((reminder) => (
+              <ReminderCard
+                key={reminder.id}
+                reminder={reminder}
+                colors={colors}
+                onDelete={handleDeleteReminder}
+                onEdit={handleEditReminder}
+                onToggle={handleToggleReminder}
+              />
+            ))
+          )}
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Medication stock</Text>
@@ -411,6 +645,24 @@ export default function DashboardScreen() {
         onClose={() => setMealPickerOpen(false)}
         onConfirm={confirmMealStart}
       />
+      <ReminderCreatorModal
+        visible={reminderOpen}
+        onClose={handleReminderClose}
+        onSaved={handleReminderSaved}
+        reminder={editingReminder}
+      />
+      <Snackbar
+        visible={snackVisible}
+        onDismiss={() => setSnackVisible(false)}
+        duration={4000}
+        action={{
+          label: 'Undo',
+          onPress: handleUndoDelete,
+        }}
+        style={[styles.snackbar, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        Reminder deleted
+      </Snackbar>
     </View>
   );
 }
@@ -513,6 +765,74 @@ const styles = StyleSheet.create({
   exactLinkText: { fontSize: 14, fontWeight: '700' },
   exactWarn: { marginTop: 14, flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   exactWarnText: { flex: 1, fontSize: 12, lineHeight: 18 },
+  reminderSection: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 16,
+  },
+  reminderCardOuter: {
+    position: 'relative',
+    marginBottom: 12,
+  },
+  reminderActionBackdrop: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 100,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reminderCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 16,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reminderDetails: { flex: 1, marginRight: 14 },
+  reminderLabel: { fontSize: 15, fontWeight: '800', marginTop: 6 },
+  reminderMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 10 },
+  reminderMeta: { fontSize: 12, lineHeight: 18 },
+  reminderActionGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  iconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconPressed: { opacity: 0.7 },
+  typePill: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  typePillText: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  badge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  badgeText: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  emptyState: { paddingVertical: 28, alignItems: 'center', justifyContent: 'center' },
+  emptyTitle: { fontSize: 17, fontWeight: '800', marginBottom: 8 },
+  emptyCopy: { textAlign: 'center', fontSize: 13, lineHeight: 20, marginBottom: 16, maxWidth: '84%' },
+  createButton: { borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18 },
+  createButtonText: { color: '#041210', fontWeight: '800', fontSize: 14 },
+  snackbar: {
+    borderRadius: 16,
+    borderWidth: 1,
+    marginHorizontal: 20,
+    marginBottom: 14,
+  },
   mealModalRoot: { flex: 1, justifyContent: 'flex-end' },
   mealModalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   mealSheet: {

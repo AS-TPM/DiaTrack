@@ -53,6 +53,9 @@ function MedicationEditorModal({ visible, initial, onClose, onSaved }) {
   const [breakfast, setBreakfast] = useState('');
   const [lunch, setLunch] = useState('');
   const [dinner, setDinner] = useState('');
+  const [beforeBreakfast, setBeforeBreakfast] = useState('');
+  const [beforeLunch, setBeforeLunch] = useState('');
+  const [beforeDinner, setBeforeDinner] = useState('');
   const [extras, setExtras] = useState([]);
   const { colors } = useTheme();
 
@@ -75,6 +78,9 @@ function MedicationEditorModal({ visible, initial, onClose, onSaved }) {
     setBreakfast(String(initial.breakfast_tablets ?? ''));
     setLunch(String(initial.lunch_tablets ?? ''));
     setDinner(String(initial.dinner_tablets ?? ''));
+    setBeforeBreakfast(String(initial.before_breakfast_tablets ?? ''));
+    setBeforeLunch(String(initial.before_lunch_tablets ?? ''));
+    setBeforeDinner(String(initial.before_dinner_tablets ?? ''));
     setExtras((initial.scheduleEntries ?? []).map((e, i) => ({
       key: `e-${e.id ?? i}`,
       label: e.label ?? '',
@@ -123,6 +129,9 @@ function MedicationEditorModal({ visible, initial, onClose, onSaved }) {
       breakfast_tablets: parseNum(breakfast, 0),
       lunch_tablets: parseNum(lunch, 0),
       dinner_tablets: parseNum(dinner, 0),
+      before_breakfast_tablets: parseNum(beforeBreakfast, 0),
+      before_lunch_tablets: parseNum(beforeLunch, 0),
+      before_dinner_tablets: parseNum(beforeDinner, 0),
     };
 
     const extraSlots = extras.map((e) => ({ label: e.label.trim(), tablet_count: parseNum(e.tablet_count, 0) }));
@@ -245,6 +254,41 @@ function MedicationEditorModal({ visible, initial, onClose, onSaved }) {
 >
   Daily schedule (tablets)
 </Text>     <Text style={[styles.fieldHint, { color: colors.textSecondary }]}>Breakfast, lunch, dinner • plus custom times below.</Text>Breakfast, lunch, dinner • plus custom times below.</Text>
+            <View style={styles.row3}>
+              <View style={styles.row3Col}>
+                <Text style={[styles.miniLab, { color: colors.textSecondary }]}>Before breakfast</Text>
+                <TextInput style={[
+  styles.input,
+  {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    color: colors.text,
+  },
+]} value={beforeBreakfast} onChangeText={setBeforeBreakfast} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textSecondary} />
+              </View>
+              <View style={styles.row3Col}>
+                <Text style={[styles.miniLab, { color: colors.textSecondary }]}>Before lunch</Text>
+                <TextInput style={[
+  styles.input,
+  {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    color: colors.text,
+  },
+]} value={beforeLunch} onChangeText={setBeforeLunch} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textSecondary} />
+              </View>
+              <View style={styles.row3Col}>
+                <Text style={[styles.miniLab, { color: colors.textSecondary }]}>Before dinner</Text>
+                <TextInput style={[
+  styles.input,
+  {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    color: colors.text,
+  },
+]} value={beforeDinner} onChangeText={setBeforeDinner} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textSecondary} />
+              </View>
+            </View>
             <View style={styles.row3}>
               <View style={styles.row3Col}>
                 <Text style={[styles.miniLab, { color: colors.textSecondary }]}>Breakfast</Text>
@@ -402,6 +446,24 @@ export default function MedicationsScreen() {
             ) : null}
           </View>
 
+          <View style={styles.tagRow}>
+            {metrics.beforeBreakfast > 0 ? (
+              <View style={[styles.tag, { backgroundColor: colors.surface }]}> 
+                <Text style={[styles.tagText, { color: colors.textSecondary }]}>Before breakfast {metrics.beforeBreakfast}</Text>
+              </View>
+            ) : null}
+            {metrics.beforeLunch > 0 ? (
+              <View style={[styles.tag, { backgroundColor: colors.surface }]}> 
+                <Text style={[styles.tagText, { color: colors.textSecondary }]}>Before lunch {metrics.beforeLunch}</Text>
+              </View>
+            ) : null}
+            {metrics.beforeDinner > 0 ? (
+              <View style={[styles.tag, { backgroundColor: colors.surface }]}> 
+                <Text style={[styles.tagText, { color: colors.textSecondary }]}>Before dinner {metrics.beforeDinner}</Text>
+              </View>
+            ) : null}
+          </View>
+
           <View style={styles.statGrid}>
             <View style={styles.statCell}>
               <Text style={[styles.statVal, { color: colors.text }]}>{Math.round(metrics.totalTablets)}</Text>
@@ -537,6 +599,9 @@ const styles = StyleSheet.create({
   addRowBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   addRowText: { fontSize: 14, fontWeight: '700', color: defaultColors.accent },
   extraRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  tag: { borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
+  tagText: { fontSize: 12, fontWeight: '700' },
   extraLabel: { flex: 1, marginTop: 0 },
   extraCount: { width: 72, marginTop: 0, textAlign: 'center' },
   trashBtn: { padding: 8 },

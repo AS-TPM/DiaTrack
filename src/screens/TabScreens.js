@@ -1,8 +1,8 @@
-import PlaceholderScreen from './PlaceholderScreen';
 import BloodSugarLogScreen from './BloodSugarLogScreen';
 import MedicationsScreen from './MedicationsScreen';
 import TrendsScreen from './TrendsScreen';
 import MealLogScreen from './MealLogScreen';
+import ProfileScreen from './ProfileScreen';
 
 export function LogTabScreen() {
   return <BloodSugarLogScreen />;
@@ -20,11 +20,5 @@ export function MealsTabScreen() {
 }
 
 export function ProfileTabScreen() {
-  return (
-    <PlaceholderScreen
-      title="Profile"
-      icon="person"
-      subtitle="Targets, devices, and account settings."
-    />
-  );
+  return <ProfileScreen />;
 }

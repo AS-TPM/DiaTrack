@@ -26,6 +26,9 @@ const DDL = `
     breakfast_tablets REAL NOT NULL DEFAULT 0,
     lunch_tablets REAL NOT NULL DEFAULT 0,
     dinner_tablets REAL NOT NULL DEFAULT 0,
+    before_breakfast_tablets REAL NOT NULL DEFAULT 0,
+    before_lunch_tablets REAL NOT NULL DEFAULT 0,
+    before_dinner_tablets REAL NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -69,7 +72,20 @@ const DDL = `
   );
   CREATE INDEX IF NOT EXISTS idx_med_intake_items_event
     ON medication_intake_items (event_id);
-    CREATE TABLE IF NOT EXISTS meal_logs (
+
+  CREATE TABLE IF NOT EXISTS custom_reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    label TEXT NOT NULL,
+    reminder_type TEXT NOT NULL,
+    meal_type TEXT NOT NULL,
+    duration_minutes INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    use_clock INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS meal_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   meal_type TEXT,
   meal_label TEXT,
@@ -81,7 +97,7 @@ const DDL = `
 `;
 
 /** Current bundled schema revision (increment when adding migrations below). */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 async function applyMigrations(db) {
   const row = await db.getFirstAsync('PRAGMA user_version');
@@ -89,6 +105,23 @@ async function applyMigrations(db) {
   const v = rawV != null && Number.isFinite(Number(rawV)) ? Number(rawV) : 0;
 
   await db.execAsync(DDL);
+
+  if (v < 4) {
+    await db.execAsync('ALTER TABLE medications ADD COLUMN before_breakfast_tablets REAL NOT NULL DEFAULT 0;').catch(() => {});
+    await db.execAsync('ALTER TABLE medications ADD COLUMN before_lunch_tablets REAL NOT NULL DEFAULT 0;').catch(() => {});
+    await db.execAsync('ALTER TABLE medications ADD COLUMN before_dinner_tablets REAL NOT NULL DEFAULT 0;').catch(() => {});
+    await db.execAsync(`CREATE TABLE IF NOT EXISTS custom_reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+      label TEXT NOT NULL,
+      reminder_type TEXT NOT NULL,
+      meal_type TEXT NOT NULL,
+      duration_minutes INTEGER NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      use_clock INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );`);
+  }
 
   if (v < SCHEMA_VERSION) {
     await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);

@@ -6,7 +6,7 @@ export const SUPPLY_BAR_TARGET_DAYS = 30;
 
 /**
  * @typedef {{ id?: number, label: string, tablet_count: number, sort_order?: number }} ScheduleEntry
- * @typedef {{ id?: number, name: string, dosage: string, tablets_per_box: number, box_count: number, breakfast_tablets: number, lunch_tablets: number, dinner_tablets: number }} MedicationRow
+ * @typedef {{ id?: number, name: string, dosage: string, tablets_per_box: number, box_count: number, breakfast_tablets: number, lunch_tablets: number, dinner_tablets: number, before_breakfast_tablets: number, before_lunch_tablets: number, before_dinner_tablets: number }} MedicationRow
  */
 
 /**
@@ -21,11 +21,14 @@ export function computeMedicationMetrics(med, scheduleEntries) {
   const breakfast = Math.max(0, Number(med.breakfast_tablets) || 0);
   const lunch = Math.max(0, Number(med.lunch_tablets) || 0);
   const dinner = Math.max(0, Number(med.dinner_tablets) || 0);
+  const beforeBreakfast = Math.max(0, Number(med.before_breakfast_tablets) || 0);
+  const beforeLunch = Math.max(0, Number(med.before_lunch_tablets) || 0);
+  const beforeDinner = Math.max(0, Number(med.before_dinner_tablets) || 0);
   const extraDaily = (scheduleEntries ?? []).reduce(
     (sum, e) => sum + Math.max(0, Number(e.tablet_count) || 0),
     0
   );
-  const tabletsPerDay = breakfast + lunch + dinner + extraDaily;
+  const tabletsPerDay = beforeBreakfast + breakfast + beforeLunch + lunch + beforeDinner + dinner + extraDaily;
 
   const daysRemaining =
     tabletsPerDay > 0 && Number.isFinite(totalTablets)
@@ -49,6 +52,9 @@ export function computeMedicationMetrics(med, scheduleEntries) {
     daysRemaining < LOW_STOCK_DAYS;
 
   const hasSchedule =
+    beforeBreakfast > 0 ||
+    beforeLunch > 0 ||
+    beforeDinner > 0 ||
     breakfast > 0 ||
     lunch > 0 ||
     dinner > 0 ||
@@ -57,6 +63,9 @@ export function computeMedicationMetrics(med, scheduleEntries) {
   return {
     totalTablets,
     tabletsPerDay,
+    beforeBreakfast,
+    beforeLunch,
+    beforeDinner,
     breakfast,
     lunch,
     dinner,

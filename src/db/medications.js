@@ -14,11 +14,22 @@ const MEAL_COLUMN_BY_TYPE = {
   [MEAL_TYPES.DINNER]: 'dinner_tablets',
 };
 
+const BEFORE_MEAL_COLUMN_BY_TYPE = {
+  [MEAL_TYPES.BREAKFAST]: 'before_breakfast_tablets',
+  [MEAL_TYPES.LUNCH]: 'before_lunch_tablets',
+  [MEAL_TYPES.DINNER]: 'before_dinner_tablets',
+};
+
 function normalizeLabel(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
 function doseForMeal(med, mealType, mealLabel) {
+  const beforeColumn = BEFORE_MEAL_COLUMN_BY_TYPE[mealType];
+  if (beforeColumn && Number(med[beforeColumn]) > 0) {
+    return Math.max(0, Number(med[beforeColumn]) || 0);
+  }
+
   const column = MEAL_COLUMN_BY_TYPE[mealType];
   if (column) {
     return Math.max(0, Number(med[column]) || 0);
@@ -35,7 +46,7 @@ function doseForMeal(med, mealType, mealLabel) {
 
 async function listMedicationsWithSchedulesFromDb(db) {
   const meds = await db.getAllAsync(
-    'SELECT id, name, dosage, tablets_per_box, box_count, breakfast_tablets, lunch_tablets, dinner_tablets, created_at, updated_at FROM medications ORDER BY name COLLATE NOCASE ASC'
+    'SELECT id, name, dosage, tablets_per_box, box_count, breakfast_tablets, lunch_tablets, dinner_tablets, before_breakfast_tablets, before_lunch_tablets, before_dinner_tablets, created_at, updated_at FROM medications ORDER BY name COLLATE NOCASE ASC'
   );
   const entries = await db.getAllAsync(
     'SELECT id, medication_id, sort_order, label, tablet_count FROM medication_schedule_entries ORDER BY medication_id ASC, sort_order ASC, id ASC'
@@ -68,8 +79,8 @@ export async function insertMedication(data, extraSlots = []) {
   const db = await getDatabase();
   const now = Date.now();
   const result = await db.runAsync(
-    `INSERT INTO medications (name, dosage, tablets_per_box, box_count, breakfast_tablets, lunch_tablets, dinner_tablets, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO medications (name, dosage, tablets_per_box, box_count, breakfast_tablets, lunch_tablets, dinner_tablets, before_breakfast_tablets, before_lunch_tablets, before_dinner_tablets, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.name.trim(),
       (data.dosage ?? '').trim(),
@@ -78,6 +89,9 @@ export async function insertMedication(data, extraSlots = []) {
       data.breakfast_tablets ?? 0,
       data.lunch_tablets ?? 0,
       data.dinner_tablets ?? 0,
+      data.before_breakfast_tablets ?? 0,
+      data.before_lunch_tablets ?? 0,
+      data.before_dinner_tablets ?? 0,
       now,
       now,
     ]
@@ -105,7 +119,7 @@ export async function updateMedication(id, data, extraSlots = []) {
   const now = Date.now();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      `UPDATE medications SET name = ?, dosage = ?, tablets_per_box = ?, box_count = ?, breakfast_tablets = ?, lunch_tablets = ?, dinner_tablets = ?, updated_at = ?
+      `UPDATE medications SET name = ?, dosage = ?, tablets_per_box = ?, box_count = ?, breakfast_tablets = ?, lunch_tablets = ?, dinner_tablets = ?, before_breakfast_tablets = ?, before_lunch_tablets = ?, before_dinner_tablets = ?, updated_at = ?
        WHERE id = ?`,
       [
         data.name.trim(),
@@ -115,6 +129,9 @@ export async function updateMedication(id, data, extraSlots = []) {
         data.breakfast_tablets ?? 0,
         data.lunch_tablets ?? 0,
         data.dinner_tablets ?? 0,
+        data.before_breakfast_tablets ?? 0,
+        data.before_lunch_tablets ?? 0,
+        data.before_dinner_tablets ?? 0,
         now,
         id,
       ]
